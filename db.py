@@ -20,24 +20,28 @@ def get_connection():
 
 def book_tour(name: str, email: str, message: str, phone_number: str):
     """
-    Executes the stored procedure dbo.sp_BookTour_Insert to record a tour booking.
-    Returns the ID of the newly created booking record.
+    Inserts a tour booking record directly into the database using a parameterized SQL query.
+    Allows testing locally without needing the stored procedure created on the DB server yet.
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
         
-        # Call the stored procedure using parameter binding (prevents inline query SQL injection)
-        cursor.callproc("dbo.sp_BookTour_Insert", (name, email, message, phone_number))
+        # Parameterized query defined inside the python file
+        query = """
+            INSERT INTO dbo.WN_BookTour (Name, Email, Message, CreatedAt, PhoneNumber)
+            VALUES (%s, %s, %s, GETDATE(), %s)
+        """
         
-        # In pymssql, callproc execution requires fetching results and committing transaction
-        results = cursor.fetchall()
+        # Execute with parameter binding (prevents SQL injection)
+        cursor.execute(query, (name, email, message, phone_number))
         conn.commit()
         
-        new_id = None
-        if results:
-            new_id = results[0][0]
-            
+        # Fetch the newly generated ID
+        cursor.execute("SELECT @@IDENTITY")
+        row = cursor.fetchone()
+        new_id = row[0] if row else None
+        
         return new_id
     except Exception as e:
         conn.rollback()

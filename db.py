@@ -18,6 +18,114 @@ def get_connection():
         database=DB_NAME
     )
 
+# --- Stored Procedures Simulation (SQL Query Constants) ---
+SP_GET_IDENTITY = "SELECT @@IDENTITY"
+
+SP_BOOK_TOUR = """
+    INSERT INTO dbo.WN_BookTour (Name, Email, Message, CreatedAt, PhoneNumber)
+    VALUES (%s, %s, %s, GETDATE(), %s)
+"""
+
+SP_GET_ALL_SPACES = """
+    SELECT 
+        s.Id AS id,
+        s.Name AS name,
+        l.Name AS locationName,
+        st.Description AS spaceTypeName,
+        st.Capacity AS capacity,
+        s.PricePerDay AS pricePerDay,
+        s.Amenities AS amenities,
+        s.ImageUrl AS imageUrl,
+        CASE 
+            WHEN s.Status = 1 THEN 'available'
+            ELSE 'inactive'
+        END AS status
+    FROM dbo.WN_Spaces s
+    LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.Id
+    LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
+"""
+
+SP_GET_GALLERY_IMAGES = """
+    SELECT 
+        g.Id AS id,
+        g.Title AS title,
+        g.Description AS description,
+        g.ImageUrl AS imageUrl,
+        l.Name AS locationName
+    FROM dbo.WN_GalleryImages g
+    LEFT JOIN dbo.WN_Locations l ON g.LocationId = l.Id
+    WHERE g.Status = 1
+"""
+
+SP_GET_PRICING_PLANS = """
+    SELECT 
+        p.Id AS plan_id,
+        p.Name AS name,
+        p.Price AS price,
+        p.Description AS description,
+        f.FeatureName AS featureName
+    FROM dbo.WN_PricingPlans p
+    LEFT JOIN dbo.WN_PlanFeatures f ON p.Id = f.PlanId
+    WHERE p.IsActive = 1
+"""
+
+SP_GET_MY_BOOKINGS = """
+    SELECT 
+        b.Id AS id,
+        s.Name AS spaceName,
+        b.StartDateTime AS startDateTime,
+        b.EndDateTime AS endDateTime,
+        b.TotalAmount AS totalAmount,
+        CASE 
+            WHEN b.BookingStatus = 2 THEN 'Cancelled'
+            WHEN b.BookingStatus = 3 THEN 'Rejected'
+            ELSE 'Confirmed'
+        END AS bookingStatus
+    FROM dbo.WN_Bookings b
+    LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
+    WHERE b.UserId = %s AND b.Status = 1
+    ORDER BY b.BookingDate DESC
+"""
+
+SP_CREATE_BOOKING = """
+    INSERT INTO dbo.WN_Bookings 
+        (IdGUID, BookingDate, UserId, SpaceId, StartDateTime, EndDateTime, TotalAmount, BookingStatus, Status, Notes, CreatedOn)
+    VALUES 
+        (NEWID(), GETDATE(), %s, %s, %s, %s, %s, 1, 1, %s, GETDATE())
+"""
+
+SP_CREATE_PAYMENT = """
+    INSERT INTO dbo.WN_Payments 
+        (UserId, BookingId, Amount, Currency, PaymentMethod, PaymentStatus, TransactionRef, PaidAt, CreatedAt)
+    VALUES 
+        (%s, %s, %s, 'PKR', %s, 'Paid', %s, GETDATE(), GETDATE())
+"""
+
+SP_CANCEL_BOOKING = """
+    UPDATE dbo.WN_Bookings 
+    SET BookingStatus = 2, UpdatedOn = GETDATE()
+    WHERE Id = %s AND UserId = %s
+"""
+
+SP_GET_MY_PAYMENTS = """
+    SELECT 
+        p.Id AS id,
+        p.Amount AS amount,
+        p.PaymentMethod AS paymentMethod,
+        p.PaymentStatus AS paymentStatus,
+        p.PaidAt AS paidAt,
+        s.Name AS workspaceName,
+        p.TransactionRef AS referenceNumber,
+        p.TransactionRef AS bankDepositId,
+        b.StartDateTime AS start_date,
+        b.EndDateTime AS end_date
+    FROM dbo.WN_Payments p
+    LEFT JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
+    LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
+    WHERE p.UserId = %s
+    ORDER BY p.PaidAt DESC
+"""
+
 def book_tour(name: str, email: str, message: str, phone_number: str):
     """
     Inserts a tour booking record directly into the database using a parameterized SQL query.
@@ -25,15 +133,10 @@ def book_tour(name: str, email: str, message: str, phone_number: str):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        
-        query = """
-            INSERT INTO dbo.WN_BookTour (Name, Email, Message, CreatedAt, PhoneNumber)
-            VALUES (%s, %s, %s, GETDATE(), %s)
-        """
-        cursor.execute(query, (name, email, message, phone_number))
+        cursor.execute(SP_BOOK_TOUR, (name, email, message, phone_number))
         conn.commit()
         
-        cursor.execute("SELECT @@IDENTITY")
+        cursor.execute(SP_GET_IDENTITY)
         row = cursor.fetchone()
         new_id = row[0] if row else None
         return new_id
@@ -50,25 +153,7 @@ def get_all_spaces():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        query = """
-            SELECT 
-                s.Id AS id,
-                s.Name AS name,
-                l.Name AS locationName,
-                st.Description AS spaceTypeName,
-                st.Capacity AS capacity,
-                s.PricePerDay AS pricePerDay,
-                s.Amenities AS amenities,
-                s.ImageUrl AS imageUrl,
-                CASE 
-                    WHEN s.Status = 1 THEN 'available'
-                    ELSE 'inactive'
-                END AS status
-            FROM dbo.WN_Spaces s
-            LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.Id
-            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
-        """
-        cursor.execute(query)
+        cursor.execute(SP_GET_ALL_SPACES)
         rows = cursor.fetchall()
         
         for row in rows:
@@ -87,18 +172,7 @@ def get_gallery_images():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        query = """
-            SELECT 
-                g.Id AS id,
-                g.Title AS title,
-                g.Description AS description,
-                g.ImageUrl AS imageUrl,
-                l.Name AS locationName
-            FROM dbo.WN_GalleryImages g
-            LEFT JOIN dbo.WN_Locations l ON g.LocationId = l.Id
-            WHERE g.Status = 1
-        """
-        cursor.execute(query)
+        cursor.execute(SP_GET_GALLERY_IMAGES)
         rows = cursor.fetchall()
         return rows
     except Exception as e:
@@ -113,18 +187,7 @@ def get_pricing_plans():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        query = """
-            SELECT 
-                p.Id AS plan_id,
-                p.Name AS name,
-                p.Price AS price,
-                p.Description AS description,
-                f.FeatureName AS featureName
-            FROM dbo.WN_PricingPlans p
-            LEFT JOIN dbo.WN_PlanFeatures f ON p.Id = f.PlanId
-            WHERE p.IsActive = 1
-        """
-        cursor.execute(query)
+        cursor.execute(SP_GET_PRICING_PLANS)
         rows = cursor.fetchall()
         
         plans_dict = {}
@@ -154,24 +217,7 @@ def get_my_bookings(user_id: int):
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        query = """
-            SELECT 
-                b.Id AS id,
-                s.Name AS spaceName,
-                b.StartDateTime AS startDateTime,
-                b.EndDateTime AS endDateTime,
-                b.TotalAmount AS totalAmount,
-                CASE 
-                    WHEN b.BookingStatus = 2 THEN 'Cancelled'
-                    WHEN b.BookingStatus = 3 THEN 'Rejected'
-                    ELSE 'Confirmed'
-                END AS bookingStatus
-            FROM dbo.WN_Bookings b
-            LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-            WHERE b.UserId = %s AND b.Status = 1
-            ORDER BY b.BookingDate DESC
-        """
-        cursor.execute(query, (user_id,))
+        cursor.execute(SP_GET_MY_BOOKINGS, (user_id,))
         rows = cursor.fetchall()
         
         for row in rows:
@@ -197,27 +243,15 @@ def create_booking(user_id: int, space_id: int, start_date: str, end_date: str, 
         cursor = conn.cursor()
         
         # 1. Insert into WN_Bookings
-        booking_query = """
-            INSERT INTO dbo.WN_Bookings 
-                (IdGUID, BookingDate, UserId, SpaceId, StartDateTime, EndDateTime, TotalAmount, BookingStatus, Status, Notes, CreatedOn)
-            VALUES 
-                (NEWID(), GETDATE(), %s, %s, %s, %s, %s, 1, 1, %s, GETDATE())
-        """
-        cursor.execute(booking_query, (user_id, space_id, start_date, end_date, amount, notes))
+        cursor.execute(SP_CREATE_BOOKING, (user_id, space_id, start_date, end_date, amount, notes))
         
         # Fetch newly created Booking ID
-        cursor.execute("SELECT @@IDENTITY")
+        cursor.execute(SP_GET_IDENTITY)
         booking_id = cursor.fetchone()[0]
         
         # 2. Insert into WN_Payments if payment exists
         if payment_method:
-            payment_query = """
-                INSERT INTO dbo.WN_Payments 
-                    (UserId, BookingId, Amount, Currency, PaymentMethod, PaymentStatus, TransactionRef, PaidAt, CreatedAt)
-                VALUES 
-                    (%s, %s, %s, 'PKR', %s, 'Paid', %s, GETDATE(), GETDATE())
-            """
-            cursor.execute(payment_query, (user_id, booking_id, amount, payment_method, reference_number))
+            cursor.execute(SP_CREATE_PAYMENT, (user_id, booking_id, amount, payment_method, reference_number))
             
         conn.commit()
         return booking_id
@@ -234,12 +268,7 @@ def cancel_booking(user_id: int, booking_id: int):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        query = """
-            UPDATE dbo.WN_Bookings 
-            SET BookingStatus = 2, UpdatedOn = GETDATE()
-            WHERE Id = %s AND UserId = %s
-        """
-        cursor.execute(query, (booking_id, user_id))
+        cursor.execute(SP_CANCEL_BOOKING, (booking_id, user_id))
         conn.commit()
         return True
     except Exception as e:
@@ -255,25 +284,7 @@ def get_my_payments(user_id: int):
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        query = """
-            SELECT 
-                p.Id AS id,
-                p.Amount AS amount,
-                p.PaymentMethod AS paymentMethod,
-                p.PaymentStatus AS paymentStatus,
-                p.PaidAt AS paidAt,
-                s.Name AS workspaceName,
-                p.TransactionRef AS referenceNumber,
-                p.TransactionRef AS bankDepositId,
-                b.StartDateTime AS start_date,
-                b.EndDateTime AS end_date
-            FROM dbo.WN_Payments p
-            LEFT JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
-            LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-            WHERE p.UserId = %s
-            ORDER BY p.PaidAt DESC
-        """
-        cursor.execute(query, (user_id,))
+        cursor.execute(SP_GET_MY_PAYMENTS, (user_id,))
         rows = cursor.fetchall()
         
         for row in rows:

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
@@ -12,7 +12,9 @@ try:
         get_my_bookings, 
         create_booking, 
         cancel_booking, 
-        get_my_payments
+        get_my_payments,
+        sync_user,
+        get_user_id_by_email
     )
 except ImportError:
     from db import (
@@ -23,8 +25,11 @@ except ImportError:
         get_my_bookings, 
         create_booking, 
         cancel_booking, 
-        get_my_payments
+        get_my_payments,
+        sync_user,
+        get_user_id_by_email
     )
+
 
 app = FastAPI(
     title="WorkNest API",
@@ -43,6 +48,12 @@ app.add_middleware(
 
 # Static User ID configuration for testing and database queries
 DEFAULT_USER_ID = 1
+
+class UserSyncRequest(BaseModel):
+    email: EmailStr = Field(..., description="User's email address")
+    firstName: Optional[str] = Field(None, description="First name of the user")
+    lastName: Optional[str] = Field(None, description="Last name of the user")
+    phone: Optional[str] = Field(None, description="Contact/phone number")
 
 # Pydantic schema matching the React Native Contact/Tour payload
 class ContactRequest(BaseModel):
@@ -144,12 +155,42 @@ def list_pricing_plans():
             detail=f"Database execution error: {str(e)}"
         )
 
+# --- User Sync API ---
+@app.post("/api/auth/sync")
+@app.post("/auth/sync")
+def sync_user_endpoint(payload: UserSyncRequest):
+    try:
+        user_id = sync_user(
+            email=payload.email,
+            first_name=payload.firstName or "",
+            last_name=payload.lastName or "",
+            phone=payload.phone
+        )
+        return {
+            "isSuccessful": True,
+            "message": "User synchronized successfully.",
+            "data": {
+                "id": user_id,
+                "email": payload.email
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
 # --- Bookings API ---
 @app.get("/api/booking/my")
 @app.get("/booking/my")
-def list_my_bookings():
+def list_my_bookings(x_user_email: Optional[str] = Header(None)):
     try:
-        return get_my_bookings(DEFAULT_USER_ID)
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        return get_my_bookings(user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -158,8 +199,14 @@ def list_my_bookings():
 
 @app.post("/api/booking", status_code=status.HTTP_201_CREATED)
 @app.post("/booking", status_code=status.HTTP_201_CREATED)
-def make_booking(payload: BookingRequest):
+def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(None)):
     try:
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        
         amount = 0.0
         method = None
         ref = None
@@ -170,7 +217,7 @@ def make_booking(payload: BookingRequest):
             ref = payload.payment.referenceNumber or payload.payment.bankDepositId or ""
             
         booking_id = create_booking(
-            user_id=DEFAULT_USER_ID,
+            user_id=user_id,
             space_id=payload.spaceId,
             start_date=payload.startDateTime,
             end_date=payload.endDateTime,
@@ -196,9 +243,14 @@ def make_booking(payload: BookingRequest):
 
 @app.patch("/api/booking/{id}/cancel")
 @app.patch("/booking/{id}/cancel")
-def cancel_my_booking(id: int):
+def cancel_my_booking(id: int, x_user_email: Optional[str] = Header(None)):
     try:
-        cancel_booking(DEFAULT_USER_ID, id)
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        cancel_booking(user_id, id)
         return {
             "isSuccessful": True,
             "message": "Booking successfully cancelled."
@@ -212,11 +264,17 @@ def cancel_my_booking(id: int):
 # --- Payments API ---
 @app.get("/api/payment/my")
 @app.get("/payment/my")
-def list_my_payments():
+def list_my_payments(x_user_email: Optional[str] = Header(None)):
     try:
-        return get_my_payments(DEFAULT_USER_ID)
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        return get_my_payments(user_id)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Database execution error: {str(e)}"
         )
+

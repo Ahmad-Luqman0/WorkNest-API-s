@@ -3,9 +3,9 @@ import os
 
 # Connection parameters with defaults pointing to the public environment
 DB_SERVER = os.getenv("DB_SERVER")
-DB_PORT = int(os.getenv("DB_PORT"))
+DB_PORT = int(os.getenv("DB_PORT")) if os.getenv("DB_PORT") else None
 DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_PASSWORD = os.getenv("DB_PASSWORD")  
 DB_NAME = os.getenv("DB_NAME")
 
 def get_connection():
@@ -20,6 +20,21 @@ def get_connection():
 
 # --- Stored Procedures Simulation (SQL Query Constants) ---
 SP_GET_IDENTITY = "SELECT @@IDENTITY"
+
+SP_GET_USER_BY_EMAIL = "SELECT Id FROM dbo.WN_Users WHERE Email = %s"
+
+SP_UPDATE_USER = """
+    UPDATE dbo.WN_Users 
+    SET FirstName = %s, LastName = %s, PhoneNumber = %s, UpdatedAt = GETDATE()
+    WHERE Id = %s
+"""
+
+SP_INSERT_USER = """
+    INSERT INTO dbo.WN_Users 
+        (FirstName, LastName, IsActive, CreatedAt, UserName, NormalizedUserName, Email, NormalizedEmail, EmailConfirmed, PhoneNumber, PhoneNumberConfirmed, TwoFactorEnabled, LockoutEnabled, AccessFailedCount)
+    VALUES 
+        (%s, %s, 1, GETDATE(), %s, %s, %s, %s, 1, %s, 0, 0, 1, 0)
+"""
 
 SP_BOOK_TOUR = """
     INSERT INTO dbo.WN_BookTour (Name, Email, Message, CreatedAt, PhoneNumber)
@@ -125,6 +140,62 @@ SP_GET_MY_PAYMENTS = """
     WHERE p.UserId = %s
     ORDER BY p.PaidAt DESC
 """
+
+def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> int:
+    """
+    Finds or creates a user by Email in WN_Users and returns their database Id.
+    """
+    if not email:
+        return 1 # Fallback
+        
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        # Check if user exists
+        cursor.execute(SP_GET_USER_BY_EMAIL, (email,))
+        row = cursor.fetchone()
+        if row:
+            user_id = row[0]
+            # Update user fields
+            cursor.execute(SP_UPDATE_USER, (first_name, last_name, phone, user_id))
+            conn.commit()
+            return user_id
+        else:
+            # Create user
+            cursor.execute(SP_INSERT_USER, (first_name, last_name, email, email.upper(), email, email.upper(), phone))
+            conn.commit()
+            
+            cursor.execute(SP_GET_IDENTITY)
+            new_id = cursor.fetchone()[0]
+            return new_id
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def get_user_id_by_email(email: str):
+    """
+    Looks up a user's database Id by email.
+    If the user does not exist, automatically syncs/creates a stub user.
+    """
+    if not email:
+        return None
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(SP_GET_USER_BY_EMAIL, (email,))
+        row = cursor.fetchone()
+        if row:
+            return row[0]
+        # Fallback: auto-create user stub if they don't exist yet
+        default_name = email.split('@')[0]
+        return sync_user(email, default_name, "")
+    except Exception:
+        return None
+    finally:
+        conn.close()
+
 
 def book_tour(name: str, email: str, message: str, phone_number: str):
     """

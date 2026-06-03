@@ -2,9 +2,9 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 try:
-    from api.db import book_tour
+    from api.db import book_tour, get_all_spaces
 except ImportError:
-    from db import book_tour
+    from db import book_tour, get_all_spaces
 
 app = FastAPI(
     title="WorkNest API",
@@ -61,6 +61,21 @@ def create_book_tour(payload: ContactRequest):
                 "phone": payload.phone
             }
         }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+@app.get("/api/space")
+@app.get("/space")
+def list_spaces():
+    """
+    Endpoint to retrieve all active coworking spaces from the database.
+    """
+    try:
+        spaces = get_all_spaces()
+        return spaces
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

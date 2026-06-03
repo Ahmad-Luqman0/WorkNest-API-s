@@ -48,3 +48,44 @@ def book_tour(name: str, email: str, message: str, phone_number: str):
         raise e
     finally:
         conn.close()
+
+def get_all_spaces():
+    """
+    Fetches all active spaces from WN_Spaces, joining their Location and SpaceType details.
+    """
+    conn = get_connection()
+    try:
+        # Use dictionary cursor for clean mapping to JSON
+        cursor = conn.cursor(as_dict=True)
+        
+        query = """
+            SELECT 
+                s.Id AS id,
+                s.Name AS name,
+                l.Name AS locationName,
+                st.Description AS spaceTypeName,
+                st.Capacity AS capacity,
+                s.PricePerDay AS pricePerDay,
+                s.Amenities AS amenities,
+                s.ImageUrl AS imageUrl,
+                CASE 
+                    WHEN s.Status = 1 THEN 'available'
+                    ELSE 'inactive'
+                END AS status
+            FROM dbo.WN_Spaces s
+            LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.Id
+            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
+        """
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        
+        # Ensure Decimals are converted to floats/ints for JSON serialization compatibility
+        for row in rows:
+            if row.get("pricePerDay") is not None:
+                row["pricePerDay"] = float(row["pricePerDay"])
+                
+        return rows
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()

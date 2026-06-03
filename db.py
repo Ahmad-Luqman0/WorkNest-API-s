@@ -2,8 +2,8 @@ import pymssql
 import os
 
 # Connection parameters with defaults pointing to the public environment
-DB_SERVER = os.getenv("DB_SERVER", "119.159.146.178")
-DB_PORT = int(os.getenv("DB_PORT", "1450"))
+DB_SERVER = os.getenv("DB_SERVER")
+DB_PORT = int(os.getenv("DB_PORT"))
 DB_USER = os.getenv("DB_USER", "workernet")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "workernet123")
 DB_NAME = os.getenv("DB_NAME", "SAC400")

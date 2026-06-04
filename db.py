@@ -18,128 +18,19 @@ def get_connection():
         database=DB_NAME
     )
 
-# --- Stored Procedures Simulation (SQL Query Constants) ---
-SP_GET_IDENTITY = "SELECT @@IDENTITY"
-
-SP_GET_USER_BY_EMAIL = "SELECT Id FROM dbo.WN_Users WHERE Email = %s"
-
-SP_UPDATE_USER = """
-    UPDATE dbo.WN_Users 
-    SET FirstName = %s, LastName = %s, PhoneNumber = %s, UpdatedAt = GETDATE()
-    WHERE Id = %s
-"""
-
-SP_INSERT_USER = """
-    INSERT INTO dbo.WN_Users 
-        (FirstName, LastName, IsActive, CreatedAt, UserName, NormalizedUserName, Email, NormalizedEmail, EmailConfirmed, PhoneNumber, PhoneNumberConfirmed, TwoFactorEnabled, LockoutEnabled, AccessFailedCount)
-    VALUES 
-        (%s, %s, 1, GETDATE(), %s, %s, %s, %s, 1, %s, 0, 0, 1, 0)
-"""
-
-SP_BOOK_TOUR = """
-    INSERT INTO dbo.WN_BookTour (Name, Email, Message, CreatedAt, PhoneNumber)
-    VALUES (%s, %s, %s, GETDATE(), %s)
-"""
-
-SP_GET_ALL_SPACES = """
-    SELECT 
-        s.Id AS id,
-        s.Name AS name,
-        l.Name AS locationName,
-        st.Description AS spaceTypeName,
-        st.Capacity AS capacity,
-        s.PricePerDay AS pricePerDay,
-        s.Amenities AS amenities,
-        s.ImageUrl AS imageUrl,
-        CASE 
-            WHEN s.Status = 1 THEN 'available'
-            ELSE 'inactive'
-        END AS status
-    FROM dbo.WN_Spaces s
-    LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.Id
-    LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.Id
-"""
-
-SP_GET_GALLERY_IMAGES = """
-    SELECT 
-        g.Id AS id,
-        g.Title AS title,
-        g.Description AS description,
-        g.ImageUrl AS imageUrl,
-        l.Name AS locationName
-    FROM dbo.WN_GalleryImages g
-    LEFT JOIN dbo.WN_Locations l ON g.LocationId = l.Id
-    WHERE g.Status = 1
-"""
-
-SP_GET_PRICING_PLANS = """
-    SELECT 
-        p.Id AS plan_id,
-        p.Name AS name,
-        p.Price AS price,
-        p.Description AS description,
-        f.FeatureName AS featureName
-    FROM dbo.WN_PricingPlans p
-    LEFT JOIN dbo.WN_PlanFeatures f ON p.Id = f.PlanId
-    WHERE p.IsActive = 1
-"""
-
-SP_GET_MY_BOOKINGS = """
-    SELECT 
-        b.Id AS id,
-        s.Name AS spaceName,
-        b.StartDateTime AS startDateTime,
-        b.EndDateTime AS endDateTime,
-        b.TotalAmount AS totalAmount,
-        CASE 
-            WHEN b.BookingStatus = 2 THEN 'Cancelled'
-            WHEN b.BookingStatus = 3 THEN 'Rejected'
-            ELSE 'Confirmed'
-        END AS bookingStatus
-    FROM dbo.WN_Bookings b
-    LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-    WHERE b.UserId = %s AND b.Status = 1
-    ORDER BY b.BookingDate DESC
-"""
-
-SP_CREATE_BOOKING = """
-    INSERT INTO dbo.WN_Bookings 
-        (IdGUID, BookingDate, UserId, SpaceId, StartDateTime, EndDateTime, TotalAmount, BookingStatus, Status, Notes, CreatedOn)
-    VALUES 
-        (NEWID(), GETDATE(), %s, %s, %s, %s, %s, 1, 1, %s, GETDATE())
-"""
-
-SP_CREATE_PAYMENT = """
-    INSERT INTO dbo.WN_Payments 
-        (UserId, BookingId, Amount, Currency, PaymentMethod, PaymentStatus, TransactionRef, PaidAt, CreatedAt)
-    VALUES 
-        (%s, %s, %s, 'PKR', %s, 'Paid', %s, GETDATE(), GETDATE())
-"""
-
-SP_CANCEL_BOOKING = """
-    UPDATE dbo.WN_Bookings 
-    SET BookingStatus = 2, UpdatedOn = GETDATE()
-    WHERE Id = %s AND UserId = %s
-"""
-
-SP_GET_MY_PAYMENTS = """
-    SELECT 
-        p.Id AS id,
-        p.Amount AS amount,
-        p.PaymentMethod AS paymentMethod,
-        p.PaymentStatus AS paymentStatus,
-        p.PaidAt AS paidAt,
-        s.Name AS workspaceName,
-        p.TransactionRef AS referenceNumber,
-        p.TransactionRef AS bankDepositId,
-        b.StartDateTime AS start_date,
-        b.EndDateTime AS end_date
-    FROM dbo.WN_Payments p
-    LEFT JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
-    LEFT JOIN dbo.WN_Spaces s ON b.SpaceId = s.Id
-    WHERE p.UserId = %s
-    ORDER BY p.PaidAt DESC
-"""
+# --- Stored Procedures (Calling WN_sp_* Database Procedures) ---
+SP_GET_USER_BY_EMAIL = "EXEC dbo.WN_sp_GetUserByEmail %s"
+SP_UPDATE_USER = "EXEC dbo.WN_sp_UpdateUser %s, %s, %s, %s"
+SP_INSERT_USER = "EXEC dbo.WN_sp_InsertUser %s, %s, %s, %s, %s, %s, %s"
+SP_BOOK_TOUR = "EXEC dbo.WN_sp_BookTour %s, %s, %s, %s"
+SP_GET_ALL_SPACES = "EXEC dbo.WN_sp_GetAllSpaces"
+SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_sp_GetGalleryImages"
+SP_GET_PRICING_PLANS = "EXEC dbo.WN_sp_GetPricingPlans"
+SP_GET_MY_BOOKINGS = "EXEC dbo.WN_sp_GetMyBookings %s"
+SP_CREATE_BOOKING = "EXEC dbo.WN_sp_CreateBooking %s, %s, %s, %s, %s, %s"
+SP_CREATE_PAYMENT = "EXEC dbo.WN_sp_CreatePayment %s, %s, %s, %s, %s"
+SP_CANCEL_BOOKING = "EXEC dbo.WN_sp_CancelBooking %s, %s"
+SP_GET_MY_PAYMENTS = "EXEC dbo.WN_sp_GetMyPayments %s"
 
 def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> int:
     """
@@ -163,10 +54,9 @@ def sync_user(email: str, first_name: str, last_name: str, phone: str = None) ->
         else:
             # Create user
             cursor.execute(SP_INSERT_USER, (first_name, last_name, email, email.upper(), email, email.upper(), phone))
+            row = cursor.fetchone()
+            new_id = row[0] if row else None
             conn.commit()
-            
-            cursor.execute(SP_GET_IDENTITY)
-            new_id = cursor.fetchone()[0]
             return new_id
     except Exception as e:
         conn.rollback()
@@ -205,11 +95,9 @@ def book_tour(name: str, email: str, message: str, phone_number: str):
     try:
         cursor = conn.cursor()
         cursor.execute(SP_BOOK_TOUR, (name, email, message, phone_number))
-        conn.commit()
-        
-        cursor.execute(SP_GET_IDENTITY)
         row = cursor.fetchone()
         new_id = row[0] if row else None
+        conn.commit()
         return new_id
     except Exception as e:
         conn.rollback()
@@ -317,11 +205,11 @@ def create_booking(user_id: int, space_id: int, start_date: str, end_date: str, 
         cursor.execute(SP_CREATE_BOOKING, (user_id, space_id, start_date, end_date, amount, notes))
         
         # Fetch newly created Booking ID
-        cursor.execute(SP_GET_IDENTITY)
-        booking_id = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        booking_id = row[0] if row else None
         
         # 2. Insert into WN_Payments if payment exists
-        if payment_method:
+        if payment_method and booking_id:
             cursor.execute(SP_CREATE_PAYMENT, (user_id, booking_id, amount, payment_method, reference_number))
             
         conn.commit()

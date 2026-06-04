@@ -14,7 +14,8 @@ try:
         cancel_booking, 
         get_my_payments,
         sync_user,
-        get_user_id_by_email
+        get_user_id_by_email,
+        get_all_locations
     )
 except ImportError:
     from db import (
@@ -27,7 +28,8 @@ except ImportError:
         cancel_booking, 
         get_my_payments,
         sync_user,
-        get_user_id_by_email
+        get_user_id_by_email,
+        get_all_locations
     )
 
 
@@ -130,6 +132,18 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
 def list_spaces():
     try:
         return get_all_spaces()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+# --- Locations API ---
+@app.get("/api/location")
+@app.get("/location")
+def list_locations():
+    try:
+        return get_all_locations()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

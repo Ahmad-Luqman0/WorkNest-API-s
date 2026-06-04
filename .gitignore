@@ -5,3 +5,7 @@ venv/
 .venv/
 .idea/
 .vscode/
+
+check_records.py
+check_table.py
+insert_event_space.py

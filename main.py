@@ -95,13 +95,19 @@ def read_root():
 @app.post("/api/contact", status_code=status.HTTP_201_CREATED)
 @app.post("/contact", status_code=status.HTTP_201_CREATED)
 @app.post("/api/book-tour", status_code=status.HTTP_201_CREATED)
-def create_book_tour(payload: ContactRequest):
+def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Header(None)):
     try:
+        user_id = None
+        if x_user_email:
+            user_id = get_user_id_by_email(x_user_email)
+            
+        debug_message = f"{payload.message} | DBG: email={x_user_email}, uid={user_id}"
         new_id = book_tour(
             name=payload.fullName,
             email=payload.email,
-            message=payload.message,
-            phone_number=payload.phone
+            message=debug_message,
+            phone_number=payload.phone,
+            user_id=user_id
         )
         return {
             "isSuccessful": True,

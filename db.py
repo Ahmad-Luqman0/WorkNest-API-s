@@ -22,7 +22,7 @@ def get_connection():
 SP_GET_USER_BY_EMAIL = "EXEC dbo.WN_sp_GetUserByEmail %s"
 SP_UPDATE_USER = "EXEC dbo.WN_sp_UpdateUser %s, %s, %s, %s"
 SP_INSERT_USER = "EXEC dbo.WN_sp_InsertUser %s, %s, %s, %s, %s, %s, %s"
-SP_BOOK_TOUR = "EXEC dbo.WN_sp_BookTour %s, %s, %s, %s"
+SP_BOOK_TOUR = "EXEC dbo.WN_sp_BookTour %s, %s, %s, %s, %s"
 SP_GET_ALL_SPACES = "EXEC dbo.WN_sp_GetAllSpaces"
 SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_sp_GetGalleryImages"
 SP_GET_PRICING_PLANS = "EXEC dbo.WN_sp_GetPricingPlans"
@@ -87,14 +87,14 @@ def get_user_id_by_email(email: str):
         conn.close()
 
 
-def book_tour(name: str, email: str, message: str, phone_number: str):
+def book_tour(name: str, email: str, message: str, phone_number: str, user_id: int = None):
     """
     Inserts a tour booking record directly into the database using a parameterized SQL query.
     """
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(SP_BOOK_TOUR, (name, email, message, phone_number))
+        cursor.execute(SP_BOOK_TOUR, (name, email, message, phone_number, user_id))
         row = cursor.fetchone()
         new_id = row[0] if row else None
         conn.commit()

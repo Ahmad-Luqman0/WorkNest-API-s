@@ -28,10 +28,10 @@ CREATE PROCEDURE dbo.WN_Bookings_Cancel
 GO
 
 -- --------------------------------------------------------
--- Stored Procedure: dbo.WN_Bookings_GetMyList
+-- Stored Procedure: dbo.WN_Bookings_GetListByUserId
 -- --------------------------------------------------------
-IF OBJECT_ID('dbo.WN_Bookings_GetMyList', 'P') IS NOT NULL
-    DROP PROCEDURE dbo.WN_Bookings_GetMyList;
+IF OBJECT_ID('dbo.WN_Bookings_GetListByUserId', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Bookings_GetListByUserId;
 GO
 
 CREATE PROCEDURE dbo.WN_Bookings_GetMyList
@@ -237,19 +237,19 @@ IF OBJECT_ID('dbo.WN_PricingPlans_GetList', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_PricingPlans_GetList;
 GO
 
-CREATE PROCEDURE dbo.WN_PricingPlans_GetList
-        AS
-        BEGIN
-            SELECT 
-                p.Id AS plan_id,
-                p.Name AS name,
-                p.Price AS price,
-                p.Description AS description,
-                f.FeatureName AS featureName
-            FROM dbo.WN_PricingPlans p
-            LEFT JOIN dbo.WN_PlanFeatures f ON p.Id = f.PlanId
-            WHERE p.IsActive = 1;
-        END
+CREATE PROCEDURE [dbo].[WN_PricingPlans_GetList]
+AS
+ BEGIN
+	SELECT 
+	p.Id,
+	p.[Name],
+    ISNULL(p.[Price], 0) AS [Price],
+	p.[Description],
+	f.FeatureName
+	FROM dbo.WN_PricingPlans p with(nolock)
+	LEFT JOIN dbo.WN_PlanFeatures f with(nolock) ON p.Id = f.PlanId
+	WHERE p.IsActive = 1;
+ END
 GO
 
 -- --------------------------------------------------------
@@ -259,26 +259,26 @@ IF OBJECT_ID('dbo.WN_Spaces_GetList', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_Spaces_GetList;
 GO
 
-CREATE PROCEDURE dbo.WN_Spaces_GetList
-        AS
-        BEGIN
-            SELECT 
-                s.Id AS id,
-                s.Name AS name,
-                l.Name AS locationName,
-                st.Description AS spaceTypeName,
-                st.Capacity AS capacity,
-                s.PricePerDay AS pricePerDay,
-                s.Amenities AS amenities,
-                s.ImageUrl AS imageUrl,
-                CASE 
-                    WHEN s.Status = 1 THEN 'available'
-                    ELSE 'inactive'
-                END AS status
-            FROM dbo.WN_Spaces s
-            LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.IdGUID
-            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID;
-        END
+CREATE PROCEDURE [dbo].[WN_Spaces_GetList]
+AS
+BEGIN
+SELECT 
+	s.Id,
+	s.[Name],
+	l.[Name] AS LocationName,
+	st.[Description] AS SpaceTypeName,
+	st.Capacity,
+	s.PricePerDay,
+	s.Amenities,
+	s.ImageUrl,
+	(CASE 
+	WHEN s.Status = 1 THEN 'available'
+	ELSE 'inactive'
+	END) AS [Status]
+	FROM dbo.WN_Spaces s
+	LEFT JOIN dbo.WN_Locations l with(nolock) ON s.LocationId = l.IdGUID
+	LEFT JOIN dbo.WN_SpaceTypes st  with(nolock) ON s.SpaceTypeId = st.IdGUID;
+END
 GO
 
 -- --------------------------------------------------------
@@ -313,12 +313,12 @@ IF OBJECT_ID('dbo.WN_Users_GetByEmail', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_Users_GetByEmail;
 GO
 
-CREATE PROCEDURE dbo.WN_Users_GetByEmail
-            @Email NVARCHAR(256)
-        AS
-        BEGIN
-            SELECT Id FROM dbo.WN_Users WHERE Email = @Email;
-        END
+CREATE PROCEDURE [dbo].[WN_Users_GetByEmail]
+    @Email NVARCHAR(256)
+AS
+BEGIN
+    SELECT Id FROM dbo.WN_Users WHERE Email = @Email;
+END
 GO
 
 -- --------------------------------------------------------
@@ -328,7 +328,7 @@ IF OBJECT_ID('dbo.WN_Users_Insert', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_Users_Insert;
 GO
 
-CREATE PROCEDURE dbo.WN_Users_Insert
+CREATE PROCEDURE [dbo].[WN_Users_Insert]
             @FirstName NVARCHAR(MAX),
             @LastName NVARCHAR(MAX),
             @UserName NVARCHAR(256),
@@ -385,18 +385,18 @@ IF OBJECT_ID('dbo.WN_Users_Update', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_Users_Update;
 GO
 
-CREATE PROCEDURE dbo.WN_Users_Update
-            @FirstName NVARCHAR(MAX),
-            @LastName NVARCHAR(MAX),
-            @PhoneNumber NVARCHAR(MAX),
-            @Id INT
-        AS
-        BEGIN
-            UPDATE dbo.WN_Users 
-            SET Name = LTRIM(RTRIM(ISNULL(@FirstName, '') + ' ' + ISNULL(@LastName, ''))),
-                PhoneNumber = @PhoneNumber, 
-                UpdatedOn = GETDATE()
-            WHERE Id = @Id;
-        END
+CREATE PROCEDURE [dbo].[WN_Users_Update]
+    @FirstName NVARCHAR(MAX),
+    @LastName NVARCHAR(MAX),
+    @PhoneNumber NVARCHAR(MAX),
+    @Id INT
+AS
+BEGIN
+	UPDATE dbo.WN_Users 
+	SET [Name] = LTRIM(RTRIM(ISNULL(@FirstName, '') + ' ' + ISNULL(@LastName, ''))),
+	PhoneNumber = @PhoneNumber, 
+	UpdatedOn = GETDATE()
+	WHERE Id = @Id;
+END
 GO
 

@@ -31,6 +31,7 @@ SP_CREATE_BOOKING = "EXEC dbo.WN_Bookings_Insert %s, %s, %s, %s, %s, %s"
 SP_CREATE_PAYMENT = "EXEC dbo.WN_Payments_Insert %s, %s, %s, %s, %s"
 SP_CANCEL_BOOKING = "EXEC dbo.WN_Bookings_Cancel %s, %s"
 SP_GET_MY_PAYMENTS = "EXEC dbo.WN_Payments_GetMyList %s"
+SP_GET_ALL_LOCATIONS = "EXEC dbo.WN_Locations_GetList"
 
 def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> int:
     """
@@ -265,6 +266,20 @@ def get_my_payments(user_id: int):
                 del row['end_date']
                 
         return rows
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+def get_all_locations():
+    """
+    Fetches all active locations from WN_Locations.
+    """
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_ALL_LOCATIONS)
+        return cursor.fetchall()
     except Exception as e:
         raise e
     finally:

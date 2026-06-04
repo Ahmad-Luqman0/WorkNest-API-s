@@ -21,7 +21,7 @@ def get_connection():
 # --- Stored Procedures (Calling WN_TABLENAME_OPERATION Database Procedures) ---
 SP_GET_USER_BY_EMAIL = "EXEC dbo.WN_Users_GetByEmail %s"
 SP_UPDATE_USER = "EXEC dbo.WN_Users_Update %s, %s, %s, %s"
-SP_INSERT_USER = "EXEC dbo.WN_Users_Insert %s, %s, %s, %s, %s, %s, %s"
+SP_INSERT_USER = "EXEC dbo.WN_Users_Insert %s, %s, %s, %s, %s"
 SP_BOOK_TOUR = "EXEC dbo.WN_BookTour_Insert %s, %s, %s, %s, %s"
 SP_GET_ALL_SPACES = "EXEC dbo.WN_Spaces_GetList"
 SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_GalleryImages_GetList"
@@ -53,7 +53,7 @@ def sync_user(email: str, first_name: str, last_name: str, phone: str = None) ->
             return user_id
         else:
             # Create user
-            cursor.execute(SP_INSERT_USER, (first_name, last_name, email, email.upper(), email, email.upper(), phone))
+            cursor.execute(SP_INSERT_USER, (first_name, last_name, email, email, phone))
             row = cursor.fetchone()
             new_id = row[0] if row else None
             conn.commit()

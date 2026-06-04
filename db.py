@@ -18,19 +18,19 @@ def get_connection():
         database=DB_NAME
     )
 
-# --- Stored Procedures (Calling WN_sp_* Database Procedures) ---
-SP_GET_USER_BY_EMAIL = "EXEC dbo.WN_sp_GetUserByEmail %s"
-SP_UPDATE_USER = "EXEC dbo.WN_sp_UpdateUser %s, %s, %s, %s"
-SP_INSERT_USER = "EXEC dbo.WN_sp_InsertUser %s, %s, %s, %s, %s, %s, %s"
-SP_BOOK_TOUR = "EXEC dbo.WN_sp_BookTour %s, %s, %s, %s, %s"
-SP_GET_ALL_SPACES = "EXEC dbo.WN_sp_GetAllSpaces"
-SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_sp_GetGalleryImages"
-SP_GET_PRICING_PLANS = "EXEC dbo.WN_sp_GetPricingPlans"
-SP_GET_MY_BOOKINGS = "EXEC dbo.WN_sp_GetMyBookings %s"
-SP_CREATE_BOOKING = "EXEC dbo.WN_sp_CreateBooking %s, %s, %s, %s, %s, %s"
-SP_CREATE_PAYMENT = "EXEC dbo.WN_sp_CreatePayment %s, %s, %s, %s, %s"
-SP_CANCEL_BOOKING = "EXEC dbo.WN_sp_CancelBooking %s, %s"
-SP_GET_MY_PAYMENTS = "EXEC dbo.WN_sp_GetMyPayments %s"
+# --- Stored Procedures (Calling WN_TABLENAME_OPERATION Database Procedures) ---
+SP_GET_USER_BY_EMAIL = "EXEC dbo.WN_Users_GetByEmail %s"
+SP_UPDATE_USER = "EXEC dbo.WN_Users_Update %s, %s, %s, %s"
+SP_INSERT_USER = "EXEC dbo.WN_Users_Insert %s, %s, %s, %s, %s, %s, %s"
+SP_BOOK_TOUR = "EXEC dbo.WN_BookTour_Insert %s, %s, %s, %s, %s"
+SP_GET_ALL_SPACES = "EXEC dbo.WN_Spaces_GetList"
+SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_GalleryImages_GetList"
+SP_GET_PRICING_PLANS = "EXEC dbo.WN_PricingPlans_GetList"
+SP_GET_MY_BOOKINGS = "EXEC dbo.WN_Bookings_GetMyList %s"
+SP_CREATE_BOOKING = "EXEC dbo.WN_Bookings_Insert %s, %s, %s, %s, %s, %s"
+SP_CREATE_PAYMENT = "EXEC dbo.WN_Payments_Insert %s, %s, %s, %s, %s"
+SP_CANCEL_BOOKING = "EXEC dbo.WN_Bookings_Cancel %s, %s"
+SP_GET_MY_PAYMENTS = "EXEC dbo.WN_Payments_GetMyList %s"
 
 def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> int:
     """

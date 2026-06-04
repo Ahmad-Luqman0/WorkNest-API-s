@@ -101,11 +101,10 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
         if x_user_email:
             user_id = get_user_id_by_email(x_user_email)
             
-        debug_message = f"{payload.message} | DBG: email={x_user_email}, uid={user_id}"
         new_id = book_tour(
             name=payload.fullName,
             email=payload.email,
-            message=debug_message,
+            message=payload.message,
             phone_number=payload.phone,
             user_id=user_id
         )

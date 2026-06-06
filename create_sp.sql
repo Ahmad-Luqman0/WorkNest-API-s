@@ -34,7 +34,7 @@ IF OBJECT_ID('dbo.WN_Bookings_GetListByUserId', 'P') IS NOT NULL
     DROP PROCEDURE dbo.WN_Bookings_GetListByUserId;
 GO
 
-CREATE PROCEDURE dbo.WN_Bookings_GetMyList
+CREATE PROCEDURE dbo.WN_Bookings_GetListByUserId
             @UserId INT
         AS
         BEGIN
@@ -47,9 +47,12 @@ CREATE PROCEDURE dbo.WN_Bookings_GetMyList
                 b.StartDateTime AS startDateTime,
                 b.EndDateTime AS endDateTime,
                 b.TotalAmount AS totalAmount,
+                b.Notes AS notes,
+                b.BookingDate AS createdAt,
                 CASE 
                     WHEN b.BookingStatus = 2 THEN 'Cancelled'
                     WHEN b.BookingStatus = 3 THEN 'Rejected'
+                    WHEN b.BookingStatus = 1 THEN 'Pending'
                     ELSE 'Confirmed'
                 END AS bookingStatus
             FROM dbo.WN_Bookings b
@@ -269,6 +272,7 @@ SELECT
 	st.[Description] AS SpaceTypeName,
 	st.Capacity,
 	s.PricePerDay,
+    s.pricePerHour,
 	s.Amenities,
 	s.ImageUrl,
 	(CASE 
@@ -400,3 +404,128 @@ BEGIN
 END
 GO
 
+
+-- --------------------------------------------------------
+-- Stored Procedure: dbo.WN_Users_GetList
+-- --------------------------------------------------------
+IF OBJECT_ID('dbo.WN_Users_GetList', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Users_GetList;
+GO
+
+CREATE PROCEDURE dbo.WN_Users_GetList
+AS
+BEGIN
+    SELECT
+        u.Id           AS id,
+        u.Email        AS email,
+        u.Name         AS firstName,
+        u.PhoneNumber  AS phone,
+        u.CreatedOn    AS createdAt
+    FROM dbo.WN_Users u WITH (NOLOCK)
+    ORDER BY u.CreatedOn DESC;
+END
+GO
+
+-- --------------------------------------------------------
+-- Stored Procedure: dbo.WN_Bookings_GetList  (all bookings)
+-- --------------------------------------------------------
+IF OBJECT_ID('dbo.WN_Bookings_GetList', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Bookings_GetList;
+GO
+
+CREATE PROCEDURE dbo.WN_Bookings_GetList
+AS
+BEGIN
+    SELECT
+        b.Id                AS id,
+        u.Email             AS userEmail,
+        s.Name              AS spaceName,
+        b.StartDateTime     AS startDateTime,
+        b.EndDateTime       AS endDateTime,
+        b.TotalAmount       AS totalAmount,
+        b.Notes             AS notes,
+        b.BookingDate       AS createdAt,
+        CASE
+            WHEN b.BookingStatus = 2 THEN 'Cancelled'
+            WHEN b.BookingStatus = 3 THEN 'Rejected'
+            WHEN b.BookingStatus = 1 THEN 'Pending'
+            ELSE 'Confirmed'
+        END AS bookingStatus
+    FROM dbo.WN_Bookings b WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK)  ON b.UserGuid  = u.IdGUID
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON b.SpaceGuid = s.SpaceTypeId
+    WHERE b.Status = 1
+    ORDER BY b.BookingDate DESC;
+END
+GO
+
+-- --------------------------------------------------------
+-- Stored Procedure: dbo.WN_Payments_GetList  (all payments)
+-- --------------------------------------------------------
+IF OBJECT_ID('dbo.WN_Payments_GetList', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Payments_GetList;
+GO
+
+CREATE PROCEDURE dbo.WN_Payments_GetList
+AS
+BEGIN
+    SELECT
+        p.Id                AS id,
+        u.Email             AS userEmail,
+        p.Amount            AS amount,
+        p.PaymentMethod     AS paymentMethod,
+        p.PaymentStatus     AS paymentStatus,
+        p.TransactionRef    AS transactionRef,
+        p.PaidAt            AS paidAt
+    FROM dbo.WN_Payments p WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON p.UserId = u.IdGUID
+    ORDER BY p.PaidAt DESC;
+END
+GO
+
+-- --------------------------------------------------------
+-- Stored Procedure: dbo.WN_Contacts_GetList
+-- --------------------------------------------------------
+IF OBJECT_ID('dbo.WN_Contacts_GetList', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Contacts_GetList;
+GO
+
+CREATE PROCEDURE dbo.WN_Contacts_GetList
+AS
+BEGIN
+    SELECT
+        b.Id            AS id,
+        b.Name          AS fullName,
+        b.Email         AS email,
+        b.PhoneNumber   AS phone,
+        b.Message       AS message,
+        b.CreatedOn     AS createdAt
+    FROM dbo.WN_BookTour b WITH (NOLOCK)
+    WHERE b.Status = 1
+    ORDER BY b.CreatedOn DESC;
+END
+GO
+
+-- --------------------------------------------------------
+-- Stored Procedure: dbo.WN_Memberships_GetList
+-- --------------------------------------------------------
+IF OBJECT_ID('dbo.WN_Memberships_GetList', 'P') IS NOT NULL
+    DROP PROCEDURE dbo.WN_Memberships_GetList;
+GO
+
+CREATE PROCEDURE dbo.WN_Memberships_GetList
+AS
+BEGIN
+    SELECT
+        m.Id            AS id,
+        u.Email         AS userEmail,
+        p.Name          AS planName,
+        m.StartDate     AS startDate,
+        m.EndDate       AS endDate,
+        m.Status        AS status
+    FROM dbo.WN_Memberships m WITH (NOLOCK)
+    LEFT JOIN dbo.WN_Users u        WITH (NOLOCK) ON m.UserId    = u.IdGUID
+    LEFT JOIN dbo.WN_PricingPlans p WITH (NOLOCK) ON m.PlanId    = p.IdGUID
+    ORDER BY m.StartDate DESC;
+END
+GO

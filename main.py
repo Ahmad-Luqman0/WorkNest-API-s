@@ -15,7 +15,17 @@ try:
         get_my_payments,
         sync_user,
         get_user_id_by_email,
-        get_all_locations
+        get_all_locations,
+        get_booking_by_id,
+        create_payment,
+        get_all_users,
+        get_all_bookings,
+        get_all_payments,
+        get_all_space_types,
+        get_all_contacts,
+        get_all_memberships,
+        insert_space,
+        update_space
     )
 except ImportError:
     from db import (
@@ -29,7 +39,18 @@ except ImportError:
         get_my_payments,
         sync_user,
         get_user_id_by_email,
-        get_all_locations
+        get_all_locations,
+        get_booking_by_id,
+        create_payment,
+        get_all_users,
+        get_all_bookings,
+        get_all_payments,
+        get_all_space_types,
+        get_all_contacts,
+        get_all_memberships,
+        insert_space,
+        update_space
+        
     )
 
 
@@ -56,6 +77,39 @@ class UserSyncRequest(BaseModel):
     firstName: Optional[str] = Field(None, description="First name of the user")
     lastName: Optional[str] = Field(None, description="Last name of the user")
     phone: Optional[str] = Field(None, description="Contact/phone number")
+
+class UserRegisterRequest(BaseModel):
+    email: EmailStr
+    password: Optional[str] = None
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+    phone: Optional[str] = None
+
+class UserLoginRequest(BaseModel):
+    email: EmailStr
+    password: Optional[str] = None
+
+class GoogleLoginRequest(BaseModel):
+    idToken: str
+    email: EmailStr
+    firstName: Optional[str] = None
+    lastName: Optional[str] = None
+
+class CardPaymentRequest(BaseModel):
+    bookingId: int
+    cardHolderName: str
+    cardNumber: str
+    expiryMonth: str
+    expiryYear: str
+    cvv: str
+
+class CounterPaymentRequest(BaseModel):
+    bookingId: int
+    amount: float
+
+class VoucherGenerateRequest(BaseModel):
+    bookingId: int
+    amount: float
 
 # Pydantic schema matching the React Native Contact/Tour payload
 class ContactRequest(BaseModel):
@@ -84,6 +138,7 @@ class BookingRequest(BaseModel):
     notes: Optional[str] = None
     guest: Optional[GuestDetails] = None
     payment: Optional[PaymentDetails] = None
+    totalAmount: Optional[float] = None
 
 @app.get("/")
 def read_root():
@@ -226,7 +281,8 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
             if resolved_id:
                 user_id = resolved_id
         
-        amount = 0.0
+        amount = payload.totalAmount or 0.0
+        print(f"[booking] totalAmount received: {payload.totalAmount}, using: {amount}")
         method = None
         ref = None
         
@@ -251,6 +307,7 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
             "data": {
                 "id": booking_id,
                 "spaceId": payload.spaceId,
+                "totalAmount": amount,
                 "amount": amount
             }
         }
@@ -297,3 +354,303 @@ def list_my_payments(x_user_email: Optional[str] = Header(None)):
             detail=f"Database execution error: {str(e)}"
         )
 
+# --- Booking Details API ---
+@app.get("/api/booking/{id}")
+@app.get("/booking/{id}")
+def get_booking(id: int, x_user_email: Optional[str] = Header(None)):
+    try:
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        
+        booking_data = get_booking_by_id(user_id, id)
+        if not booking_data:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        return {
+            "isSuccessful": True,
+            "message": "Booking retrieved successfully.",
+            "data": booking_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+# --- Payment Gateways API ---
+@app.post("/api/payment/card")
+@app.post("/payment/card")
+def process_card_payment(payload: CardPaymentRequest, x_user_email: Optional[str] = Header(None)):
+    try:
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        
+        # Fetch booking to get the amount
+        booking_data = get_booking_by_id(user_id, payload.bookingId)
+        if not booking_data:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        amount = booking_data["totalAmount"]
+        import random
+        tx_ref = f"TXN-CARD-{payload.bookingId}-{random.randint(100000, 999999)}"
+        
+        # Record payment in DB
+        create_payment(
+            user_id=user_id,
+            booking_id=payload.bookingId,
+            amount=amount,
+            payment_method="Card",
+            transaction_ref=tx_ref
+        )
+        
+        return {
+            "isSuccessful": True,
+            "message": "Card payment processed successfully.",
+            "transactionRef": tx_ref
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+@app.post("/api/payment/voucher/generate")
+@app.post("/payment/voucher/generate")
+def generate_voucher(payload: VoucherGenerateRequest, x_user_email: Optional[str] = Header(None)):
+    try:
+        user_id = DEFAULT_USER_ID
+        if x_user_email:
+            resolved_id = get_user_id_by_email(x_user_email)
+            if resolved_id:
+                user_id = resolved_id
+        
+        # Verify booking exists
+        booking_data = get_booking_by_id(user_id, payload.bookingId)
+        if not booking_data:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        import random
+        from datetime import datetime, timedelta
+        voucher_number = f"1BILL{payload.bookingId:04d}{random.randint(10000, 99999):05d}"
+        expiry_date = (datetime.utcnow() + timedelta(days=3)).isoformat() + "Z"
+        
+        # Record payment in DB with "Voucher" method
+        create_payment(
+            user_id=user_id,
+            booking_id=payload.bookingId,
+            amount=payload.amount,
+            payment_method="Voucher",
+            transaction_ref=voucher_number
+        )
+        
+        return {
+            "isSuccessful": True,
+            "message": "Voucher generated successfully.",
+            "voucherNumber": voucher_number,
+            "expiryDate": expiry_date,
+            "amount": payload.amount,
+            "paymentChannels": [
+                "Any bank branch (over the counter)",
+                "ATM (Bill Payment)",
+                "Internet Banking",
+                "EasyPaisa / JazzCash",
+                "HBL Mobile / MCB Mobile"
+            ]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+# --- Auth Sync Wrappers ---
+@app.post("/api/auth/register")
+@app.post("/auth/register")
+def register_user(payload: UserRegisterRequest):
+    try:
+        user_id = sync_user(
+            email=payload.email,
+            first_name=payload.firstName or "",
+            last_name=payload.lastName or "",
+            phone=payload.phone
+        )
+        return {
+            "isSuccessful": True,
+            "message": "User registered/synchronized successfully.",
+            "data": {
+                "id": user_id,
+                "email": payload.email
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+@app.post("/api/auth/login")
+@app.post("/auth/login")
+def login_user(payload: UserLoginRequest):
+    try:
+        user_id = get_user_id_by_email(payload.email)
+        return {
+            "isSuccessful": True,
+            "message": "User logged in/synchronized successfully.",
+            "data": {
+                "id": user_id,
+                "email": payload.email
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+@app.post("/api/auth/google-login")
+@app.post("/auth/google-login")
+def google_login_user(payload: GoogleLoginRequest):
+    try:
+        user_id = sync_user(
+            email=payload.email,
+            first_name=payload.firstName or "",
+            last_name=payload.lastName or ""
+        )
+        return {
+            "isSuccessful": True,
+            "message": "Google user synchronized successfully.",
+            "data": {
+                "id": user_id,
+                "email": payload.email
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database execution error: {str(e)}"
+        )
+
+
+# --- Admin: All Users ---
+@app.get("/api/user")
+@app.get("/user")
+def list_users():
+    try:
+        return get_all_users()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin: All Bookings ---
+@app.get("/api/booking")
+@app.get("/booking")
+def list_all_bookings():
+    try:
+        return get_all_bookings()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin: All Payments ---
+@app.get("/api/payment")
+@app.get("/payment")
+def list_all_payments():
+    try:
+        return get_all_payments()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin: Space Types ---
+@app.get("/api/spacetype")
+@app.get("/spacetype")
+def list_space_types():
+    try:
+        return get_all_space_types()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin: All Contacts (GET) ---
+@app.get("/api/contact")
+@app.get("/contact")
+def list_contacts():
+    try:
+        return get_all_contacts()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Admin: All Memberships ---
+@app.get("/api/membership")
+@app.get("/membership")
+def list_memberships():
+    try:
+        return get_all_memberships()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+# --- Admin: Create Space ---
+class SpaceInsertRequest(BaseModel):
+    name: str
+    locationId: int
+    spaceTypeId: int
+    code: Optional[str] = None
+    description: Optional[str] = None
+    floor: Optional[str] = None
+    pricePerDay: Optional[float] = None
+    pricePerHour: Optional[float] = None
+    imageUrl: Optional[str] = None
+    amenities: Optional[str] = None
+
+@app.post("/api/space", status_code=status.HTTP_201_CREATED)
+@app.post("/space", status_code=status.HTTP_201_CREATED)
+def create_space(payload: SpaceInsertRequest):
+    try:
+        new_id = insert_space(
+            name=payload.name,
+            location_id=payload.locationId,
+            space_type_id=payload.spaceTypeId,
+            code=payload.code,
+            description=payload.description,
+            floor=payload.floor,
+            price_per_day=payload.pricePerDay,
+            price_per_hour=payload.pricePerHour,
+            image_url=payload.imageUrl,
+            amenities=payload.amenities
+        )
+        return {"isSuccessful": True, "message": "Space created successfully.", "data": {"id": new_id}}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database execution error: {str(e)}")
+class SpaceUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    locationId: Optional[int] = None
+    spaceTypeId: Optional[int] = None
+    code: Optional[str] = None
+    description: Optional[str] = None
+    floor: Optional[str] = None
+    pricePerDay: Optional[float] = None
+    pricePerHour: Optional[float] = None
+    imageUrl: Optional[str] = None
+    amenities: Optional[str] = None
+
+@app.put("/api/space/{id}")
+@app.put("/space/{id}")
+def edit_space(id: int, payload: SpaceUpdateRequest):
+    try:
+        update_space(id, payload.name, payload.locationId, payload.spaceTypeId,
+            payload.code, payload.description, payload.floor,
+            payload.pricePerDay, payload.pricePerHour, payload.imageUrl, payload.amenities)
+        return {"isSuccessful": True, "message": "Space updated successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database execution error: {str(e)}")

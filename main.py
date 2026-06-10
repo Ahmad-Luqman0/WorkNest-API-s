@@ -319,13 +319,20 @@ def get_user_history(id: str):
             raise HTTPException(status_code=404, detail="User not found")
 
         cursor.execute("""
-            SELECT b.Id AS id, st.Description AS spaceName,
+            SELECT b.Id AS id,
+                   s.Name AS spaceName,
                    b.StartDateTime AS startDateTime, b.EndDateTime AS endDateTime,
                    b.TotalAmount AS totalAmount,
-                   CASE b.BookingStatus WHEN 2 THEN 'Cancelled' WHEN 3 THEN 'Rejected' ELSE 'Confirmed' END AS bookingStatus
+                   CASE b.BookingStatus
+                     WHEN 1 THEN 'Confirmed'
+                     WHEN 2 THEN 'Cancelled'
+                     WHEN 3 THEN 'Rejected'
+                     WHEN 4 THEN 'Completed'
+                     ELSE 'Pending'
+                   END AS bookingStatus
             FROM dbo.WN_Bookings b
-            LEFT JOIN dbo.WN_SpaceTypes st ON b.SpaceGuid = st.IdGUID
-            WHERE b.UserId = %d AND b.Status = 1
+            LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+            WHERE b.UserGuid = (SELECT IdGUID FROM dbo.WN_Users WHERE Id = %d) AND b.Status = 1
             ORDER BY b.StartDateTime DESC
         """, (uid,))
         bookings = cursor.fetchall()
@@ -338,7 +345,7 @@ def get_user_history(id: str):
             SELECT p.Id AS id, p.Amount AS amount, p.PaymentMethod AS paymentMethod,
                    p.PaymentStatus AS paymentStatus, p.PaidAt AS paidAt, p.CreatedAt AS createdAt
             FROM dbo.WN_Payments p
-            WHERE p.UserId = %d AND p.Status = 1
+            WHERE p.UserId = %d
             ORDER BY p.CreatedAt DESC
         """, (uid,))
         payments = cursor.fetchall()
@@ -357,8 +364,8 @@ def get_user_history(id: str):
                 "failedPayments": sum(1 for p in payments if p.get("paymentStatus") == "Failed"),
                 "cancelledBookings": sum(1 for b in bookings if b.get("bookingStatus") == "Cancelled"),
             },
-            "recentBookings": bookings[:5],
-            "recentPayments": payments[:5],
+            "recentBookings": bookings,
+            "recentPayments": payments,
         })
     except HTTPException:
         raise

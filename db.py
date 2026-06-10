@@ -227,10 +227,26 @@ def create_booking(user_id, space_id, start_date, end_date, notes, amount, payme
         cursor.execute(SP_CREATE_BOOKING, (user_id, space_id, start_date, end_date, amount, notes))
         row = cursor.fetchone()
         booking_id = row[0] if row else None
+        booking_guid = None
+        if booking_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_Bookings WHERE Id = %d", (booking_id,))
+            r = cursor.fetchone()
+            if r:
+                booking_guid = r.get("IdGUID") if isinstance(r, dict) else r[0]
+        payment_result = None
         if payment_method and booking_id:
             cursor.execute(SP_CREATE_PAYMENT, (user_id, booking_id, amount, payment_method, reference_number))
+            prow = cursor.fetchone()
+            payment_id = prow[0] if prow else None
+            payment_guid = None
+            if payment_id:
+                cursor.execute("SELECT IdGUID FROM dbo.WN_Payments WHERE Id = %d", (payment_id,))
+                pr = cursor.fetchone()
+                if pr:
+                    payment_guid = pr.get("IdGUID") if isinstance(pr, dict) else pr[0]
+            payment_result = {"id": payment_id, "idGuid": payment_guid}
         conn.commit()
-        return booking_id
+        return {"id": booking_id, "idGuid": booking_guid, "payment": payment_result}
     except Exception as e:
         conn.rollback()
         raise e
@@ -343,8 +359,16 @@ def create_payment(user_id, booking_id, amount, payment_method, transaction_ref)
     try:
         cursor = conn.cursor()
         cursor.execute(SP_CREATE_PAYMENT, (user_id, booking_id, amount, payment_method, transaction_ref))
+        prow = cursor.fetchone()
+        payment_id = prow[0] if prow else None
+        payment_guid = None
+        if payment_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_Payments WHERE Id = %d", (payment_id,))
+            pr = cursor.fetchone()
+            if pr:
+                payment_guid = pr.get("IdGUID") if isinstance(pr, dict) else pr[0]
         conn.commit()
-        return True
+        return {"id": payment_id, "idGuid": payment_guid}
     except Exception as e:
         conn.rollback()
         raise e

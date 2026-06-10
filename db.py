@@ -157,7 +157,11 @@ def get_gallery_images():
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute(SP_GET_GALLERY_IMAGES)
-        return cursor.fetchall()
+        rows = cursor.fetchall()
+        for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
+        return rows
     except Exception as e:
         raise e
     finally:
@@ -178,6 +182,7 @@ def get_pricing_plans():
             if plan_id not in plans_dict:
                 price_val = row.get("Price") or row.get("price")
                 plans_dict[plan_id] = {
+                    "idGuid":      row.get("IdGUID") or row.get("idGuid"),
                     "id":          plan_id,
                     "name":        row.get("Name") or row.get("name"),
                     "price":       float(price_val) if price_val is not None else 0.0,
@@ -201,6 +206,8 @@ def get_my_bookings(user_id: int):
         cursor.execute(SP_GET_MY_BOOKINGS, (user_id,))
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             if row.get("totalAmount") is not None:
                 row["totalAmount"] = float(row["totalAmount"])
             row["startDateTime"] = _iso(row.get("startDateTime"))
@@ -252,6 +259,8 @@ def get_my_payments(user_id: int):
         cursor.execute(SP_GET_MY_PAYMENTS, (user_id,))
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             if row.get("amount") is not None:
                 row["amount"] = float(row["amount"])
             row["paidAt"] = _iso(row.get("paidAt"))
@@ -275,9 +284,8 @@ def get_all_locations():
         cursor.execute(SP_GET_ALL_LOCATIONS)
         rows = cursor.fetchall()
         for row in rows:
-            # Map Id to idGuid if available
-            if "IdGUID" in row or "idGuid" in row:
-                row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             # Map Name to name if needed
             if "Name" in row and "name" not in row:
                 row["name"] = row["Name"]
@@ -301,6 +309,7 @@ def get_booking_by_id(user_id: int, booking_id: int):
         user_guid = row["IdGUID"]
         query = """
             SELECT
+                b.IdGUID AS idGuid,
                 b.Id AS id,
                 st.Description AS spaceName,
                 b.StartDateTime AS startDateTime,
@@ -352,6 +361,8 @@ def get_all_users():
         cursor.execute(SP_GET_ALL_USERS)
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             row["createdAt"] = _iso(row.get("createdAt") or row.get("CreatedAt"))
             first = row.get("firstName") or row.get("FirstName") or ""
             last  = row.get("lastName")  or row.get("LastName")  or ""
@@ -374,6 +385,8 @@ def get_all_bookings():
         cursor.execute(SP_GET_ALL_BOOKINGS)
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             amount = row.get("totalAmount") or row.get("TotalAmount") or row.get("Total_Amount") or 0
             row["totalAmount"]   = float(amount) if amount is not None else 0.0
             row["startDateTime"] = _iso(row.get("startDateTime") or row.get("StartDateTime"))
@@ -396,6 +409,8 @@ def get_all_payments():
         cursor.execute(SP_GET_ALL_PAYMENTS)
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             if row.get("amount") is not None:
                 row["amount"] = float(row["amount"])
             row["paidAt"] = _iso(row.get("paidAt"))
@@ -433,6 +448,8 @@ def get_all_contacts():
         cursor.execute(SP_GET_ALL_CONTACTS)
         rows = cursor.fetchall()
         for row in rows:
+            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            row["id"] = row.get("Id") or row.get("id")
             row["createdAt"] = _iso(row.get("createdAt"))
         return rows
     except Exception as e:
@@ -446,7 +463,7 @@ def get_all_memberships():
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute("""
-            SELECT m.Id AS id, u.Email AS userEmail,
+            SELECT m.IdGUID AS idGuid, m.Id AS id, u.Email AS userEmail,
                    pp.Name AS planName, pp.Price AS planPrice, pp.BillingCycle AS planCycle,
                    m.StartDate AS startDate, m.EndDate AS endDate, m.Status AS status
             FROM dbo.WN_Memberships m

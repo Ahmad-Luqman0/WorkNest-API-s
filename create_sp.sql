@@ -507,6 +507,7 @@ END
 GO
 
 -- --------------------------------------------------------
+<<<<<<< HEAD
 -- Stored Procedure: dbo.WN_Payments_UpdateStatusByRef
 -- --------------------------------------------------------
 IF OBJECT_ID('dbo.WN_Payments_UpdateStatusByRef', 'P') IS NOT NULL
@@ -526,6 +527,8 @@ END
 GO
 
 -- --------------------------------------------------------
+=======
+>>>>>>> 17ca6d2c8411ef47f069622c6607470f02b62926
 -- Stored Procedure: dbo.WN_Memberships_GetList
 -- --------------------------------------------------------
 IF OBJECT_ID('dbo.WN_Memberships_GetList', 'P') IS NOT NULL

@@ -12,23 +12,59 @@ except ImportError:
 
 try:
     from api.db import (
-        book_tour, get_all_spaces, get_gallery_images, get_pricing_plans,
-        get_my_bookings, create_booking, cancel_booking, get_my_payments,
-        sync_user, get_user_id_by_email, get_all_locations, get_booking_by_id,
-        create_payment, get_all_users, get_all_bookings, get_all_payments,
-        get_all_space_types, get_all_contacts, get_all_memberships,
-        insert_space, update_space, delete_space, update_payment_status,
-        get_connection, _iso
+        book_tour,
+        get_all_spaces,
+        get_gallery_images,
+        get_pricing_plans,
+        get_my_bookings,
+        create_booking,
+        cancel_booking,
+        get_my_payments,
+        sync_user,
+        get_user_id_by_email, 
+        get_all_locations, 
+        get_booking_by_id,
+        create_payment,
+        get_all_users, 
+        get_all_bookings, 
+        get_all_payments,
+        get_all_space_types, 
+        get_all_contacts, 
+        get_all_memberships,
+        insert_space, 
+        update_space,
+        delete_space, 
+        update_payment_status,
+        get_connection,
+        _iso
     )
 except ImportError:
     from db import (
-        book_tour, get_all_spaces, get_gallery_images, get_pricing_plans,
-        get_my_bookings, create_booking, cancel_booking, get_my_payments,
-        sync_user, get_user_id_by_email, get_all_locations, get_booking_by_id,
-        create_payment, get_all_users, get_all_bookings, get_all_payments,
-        get_all_space_types, get_all_contacts, get_all_memberships,
-        insert_space, update_space, delete_space, update_payment_status,
-        get_connection, _iso
+        book_tour,
+        get_all_spaces,
+        get_gallery_images,
+        get_pricing_plans,
+        get_my_bookings,
+        create_booking,
+        cancel_booking,
+        get_my_payments,
+        sync_user,
+        get_user_id_by_email, 
+        get_all_locations, 
+        get_booking_by_id,
+        create_payment,
+        get_all_users, 
+        get_all_bookings, 
+        get_all_payments,
+        get_all_space_types, 
+        get_all_contacts, 
+        get_all_memberships,
+        insert_space, 
+        update_space,
+        delete_space, 
+        update_payment_status,
+        get_connection,
+        _iso
     )
 
 app = FastAPI(title="WorkNest API", version="1.0.0")
@@ -427,7 +463,7 @@ def update_location(id: int, payload: LocationUpsertRequest):
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE dbo.WN_Locations SET Name=%s, Address=%s, City=%s,
-            OpeningTime=%s, ClosingTime=%s, Status=%d WHERE Id=%d
+            OpeningTime=%s, ClosingTime=%s, IsActive=%d WHERE Id=%d
         """, (payload.name, payload.address, payload.city, payload.openingTime, payload.closingTime, 1 if payload.isActive else 0, id))
         conn.commit()
         conn.close()

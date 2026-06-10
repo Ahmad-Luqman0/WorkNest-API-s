@@ -23,25 +23,25 @@ def get_connection():
     )
 
 # Stored procedure constants
-SP_GET_USER_BY_EMAIL  = "EXEC dbo.WN_Users_GetByEmail %s"
-SP_UPDATE_USER        = "EXEC dbo.WN_Users_Update %s, %s, %s, %s"
-SP_INSERT_USER        = "EXEC dbo.WN_Users_Insert %s, %s, %s, %s, %s"
-SP_BOOK_TOUR          = "EXEC dbo.WN_BookTour_Insert %s, %s, %s, %s, %s"
-SP_GET_ALL_SPACES     = "EXEC dbo.WN_Spaces_GetList"
-SP_GET_GALLERY_IMAGES = "EXEC dbo.WN_GalleryImages_GetList"
-SP_GET_PRICING_PLANS  = "EXEC dbo.WN_PricingPlans_GetList"
-SP_GET_MY_BOOKINGS    = "EXEC dbo.WN_Bookings_GetListByUserId %s"
-SP_CREATE_BOOKING     = "EXEC dbo.WN_Bookings_Insert %s, %s, %s, %s, %s, %s"
-SP_CREATE_PAYMENT     = "EXEC dbo.WN_Payments_Insert %s, %s, %s, %s, %s"
-SP_CANCEL_BOOKING     = "EXEC dbo.WN_Bookings_Cancel %s, %s"
-SP_GET_MY_PAYMENTS    = "EXEC dbo.WN_Payments_GetMyList %s"
-SP_GET_ALL_LOCATIONS  = "EXEC dbo.WN_Locations_GetList"
-SP_GET_ALL_USERS      = "EXEC dbo.WN_Users_GetList"
-SP_GET_ALL_BOOKINGS   = "EXEC dbo.WN_Bookings_GetList"
-SP_GET_ALL_PAYMENTS   = "EXEC dbo.WN_Payments_GetList"
-SP_GET_ALL_SPACE_TYPES = "EXEC dbo.WN_SpaceTypes_GetList"
-SP_GET_ALL_CONTACTS   = "EXEC dbo.WN_Contacts_GetList"
-SP_GET_ALL_MEMBERSHIPS = "EXEC dbo.WN_Memberships_GetList"
+SP_GET_USER_BY_EMAIL     = "EXEC dbo.WN_Users_GetByEmail %s"
+SP_UPDATE_USER           = "EXEC dbo.WN_Users_Update %s, %s, %s, %s"
+SP_INSERT_USER           = "EXEC dbo.WN_Users_Insert %s, %s, %s, %s, %s"
+SP_BOOK_TOUR             = "EXEC dbo.WN_BookTour_Insert %s, %s, %s, %s, %s"
+SP_GET_ALL_SPACES        = "EXEC dbo.WN_Spaces_GetList"
+SP_GET_GALLERY_IMAGES    = "EXEC dbo.WN_GalleryImages_GetList"
+SP_GET_PRICING_PLANS     = "EXEC dbo.WN_PricingPlans_GetList"
+SP_GET_MY_BOOKINGS       = "EXEC dbo.WN_Bookings_GetListByUserId %s"
+SP_CREATE_BOOKING        = "EXEC dbo.WN_Bookings_Insert %s, %s, %s, %s, %s, %s"
+SP_CREATE_PAYMENT        = "EXEC dbo.WN_Payments_Insert %s, %s, %s, %s, %s"
+SP_CANCEL_BOOKING        = "EXEC dbo.WN_Bookings_Cancel %s, %s"
+SP_GET_MY_PAYMENTS       = "EXEC dbo.WN_Payments_GetMyList %s"
+SP_GET_ALL_LOCATIONS     = "EXEC dbo.WN_Locations_GetList"
+SP_GET_ALL_USERS         = "EXEC dbo.WN_Users_GetList"
+SP_GET_ALL_BOOKINGS      = "EXEC dbo.WN_Bookings_GetList"
+SP_GET_ALL_PAYMENTS      = "EXEC dbo.WN_Payments_GetList"
+SP_GET_ALL_SPACE_TYPES   = "EXEC dbo.WN_SpaceTypes_GetList"
+SP_GET_ALL_CONTACTS      = "EXEC dbo.WN_Contacts_GetList"
+SP_GET_ALL_MEMBERSHIPS   = "EXEC dbo.WN_Memberships_GetList"
 SP_UPDATE_PAYMENT_STATUS = "EXEC dbo.WN_Payments_UpdateStatusByRef %s, %s"
 
 
@@ -346,6 +346,9 @@ def get_all_users():
         rows = cursor.fetchall()
         for row in rows:
             row["createdAt"] = _iso(row.get("createdAt") or row.get("CreatedAt"))
+            first = row.get("firstName") or row.get("FirstName") or ""
+            last  = row.get("lastName")  or row.get("LastName")  or ""
+            row["name"] = first if first else (f"{first} {last}".strip() or row.get("email") or "")
             if row.get("isActive") is None and row.get("IsActive") is None:
                 row["isActive"] = True
             elif "IsActive" in row:
@@ -365,7 +368,7 @@ def get_all_bookings():
         rows = cursor.fetchall()
         for row in rows:
             amount = row.get("totalAmount") or row.get("TotalAmount") or row.get("Total_Amount") or 0
-            row["totalAmount"] = float(amount) if amount is not None else 0.0
+            row["totalAmount"]   = float(amount) if amount is not None else 0.0
             row["startDateTime"] = _iso(row.get("startDateTime") or row.get("StartDateTime"))
             row["endDateTime"]   = _iso(row.get("endDateTime")   or row.get("EndDateTime"))
             row["createdAt"]     = _iso(row.get("createdAt")     or row.get("CreatedAt"))
@@ -454,6 +457,7 @@ def get_all_memberships():
     finally:
         conn.close()
 
+
 def insert_space(name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities):
     conn = get_connection()
     try:
@@ -471,6 +475,7 @@ def insert_space(name, location_id, space_type_id, code, description, floor, pri
     finally:
         conn.close()
 
+
 def update_space(space_id, name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities):
     conn = get_connection()
     try:
@@ -484,6 +489,7 @@ def update_space(space_id, name, location_id, space_type_id, code, description, 
         raise e
     finally:
         conn.close()
+
 
 def delete_space(space_id: int):
     conn = get_connection()

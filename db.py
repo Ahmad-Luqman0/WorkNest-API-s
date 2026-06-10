@@ -114,10 +114,10 @@ def get_all_spaces():
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute("""
-            SELECT s.Id, s.Name, s.Code, s.Description, s.Floor,
+            SELECT s.IdGUID, s.Id, s.Name, s.Code, s.Description, s.Floor,
                    s.PricePerDay, s.PricePerHour, s.Amenities, s.ImageUrl, s.Status,
-                   l.Name AS LocationName, l.Id AS LocationId,
-                   st.Description AS SpaceTypeName, st.Id AS SpaceTypeId,
+                   l.Name AS LocationName, l.IdGUID AS LocationIdGuid,
+                   st.Description AS SpaceTypeName, st.IdGUID AS SpaceTypeIdGuid,
                    st.Capacity
             FROM dbo.WN_Spaces s
             LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.IdGUID
@@ -129,20 +129,21 @@ def get_all_spaces():
         for row in rows:
             price_val = row.get("PricePerDay") or row.get("pricePerDay")
             result.append({
-                "id":           row.get("Id") or row.get("id"),
-                "name":         row.get("Name") or row.get("name"),
-                "code":         row.get("Code") or row.get("code"),
-                "locationId":   row.get("LocationId") or row.get("locationId"),
-                "spaceTypeId":  row.get("SpaceTypeId") or row.get("spaceTypeId"),
-                "locationName": row.get("LocationName") or row.get("locationName"),
-                "spaceTypeName":row.get("SpaceTypeName") or row.get("spaceTypeName"),
-                "capacity":     row.get("Capacity") or row.get("capacity"),
-                "pricePerDay":  float(price_val) if price_val is not None else 0.0,
-                "pricePerHour": float(row.get("PricePerHour") or row.get("pricePerHour") or 0),
-                "amenities":    row.get("Amenities") or row.get("amenities"),
-                "imageUrl":     row.get("ImageUrl") or row.get("imageUrl"),
-                "status":       row.get("Status") or row.get("status"),
-                "spaceStatus":  "Available" if (row.get("Status") or row.get("status")) == 1 else "Inactive",
+                "idGuid":         row.get("IdGUID") or row.get("idGuid"),
+                "id":             row.get("Id") or row.get("id"),
+                "name":           row.get("Name") or row.get("name"),
+                "code":           row.get("Code") or row.get("code"),
+                "locationIdGuid": row.get("LocationIdGuid") or row.get("locationIdGuid"),
+                "spaceTypeIdGuid":row.get("SpaceTypeIdGuid") or row.get("spaceTypeIdGuid"),
+                "locationName":   row.get("LocationName") or row.get("locationName"),
+                "spaceTypeName":  row.get("SpaceTypeName") or row.get("spaceTypeName"),
+                "capacity":       row.get("Capacity") or row.get("capacity"),
+                "pricePerDay":    float(price_val) if price_val is not None else 0.0,
+                "pricePerHour":   float(row.get("PricePerHour") or row.get("pricePerHour") or 0),
+                "amenities":      row.get("Amenities") or row.get("amenities"),
+                "imageUrl":       row.get("ImageUrl") or row.get("imageUrl"),
+                "status":         row.get("Status") or row.get("status"),
+                "spaceStatus":    "Available" if (row.get("Status") or row.get("status")) == 1 else "Inactive",
             })
         return result
     except Exception as e:
@@ -274,6 +275,12 @@ def get_all_locations():
         cursor.execute(SP_GET_ALL_LOCATIONS)
         rows = cursor.fetchall()
         for row in rows:
+            # Map Id to idGuid if available
+            if "IdGUID" in row or "idGuid" in row:
+                row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
+            # Map Name to name if needed
+            if "Name" in row and "name" not in row:
+                row["name"] = row["Name"]
             status = row.get("status") or row.get("Status") or row.get("IsActive") or row.get("isActive")
             row["isActive"] = bool(status) if status is not None else True
         return rows
@@ -406,6 +413,7 @@ def get_all_space_types():
         cursor.execute(SP_GET_ALL_SPACE_TYPES)
         rows = cursor.fetchall()
         return [{
+            "idGuid":       row.get("IdGUID") or row.get("idGuid"),
             "id":           row.get("Id") or row.get("id"),
             "name":         row.get("Description") or row.get("description") or row.get("Name") or row.get("name"),
             "capacity":     row.get("Capacity") or row.get("capacity"),

@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, status, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from typing import Optional, Union
 import random
 from datetime import datetime, timedelta
 
@@ -144,7 +144,7 @@ class PaymentDetails(BaseModel):
     referenceNumber: Optional[str] = None
 
 class BookingRequest(BaseModel):
-    spaceId: int
+    spaceId: Union[int, str]
     startDateTime: str
     endDateTime: str
     notes: Optional[str] = None
@@ -919,7 +919,20 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
             amount = payload.payment.amount
             method = payload.payment.method
             ref = payload.payment.referenceNumber or payload.payment.bankDepositId or ""
-        result = create_booking(user_id, payload.spaceId, payload.startDateTime,
+        # Resolve spaceId — accept both GUID string and numeric int
+        import re
+        guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        space_id = payload.spaceId
+        if isinstance(space_id, str) and guid_pattern.match(str(space_id)):
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT Id FROM dbo.WN_Spaces WITH (NOLOCK) WHERE IdGUID = %s", (str(space_id),))
+            row = cursor.fetchone()
+            conn.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Space not found")
+            space_id = row[0]
+        result = create_booking(user_id, space_id, payload.startDateTime,
             payload.endDateTime, payload.notes or "", amount, method, ref)
         return ok({"id": result.get("idGuid") or result.get("id"), "spaceId": payload.spaceId, "totalAmount": amount}, "Booking successful.")
     except HTTPException:

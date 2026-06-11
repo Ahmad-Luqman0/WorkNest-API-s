@@ -141,6 +141,7 @@ def get_all_spaces():
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
             result.append({
                 "id":             guid,
+                "numericId":      row.get("Id") or row.get("id") or 0,
                 "idGuid":         guid,
                 "name":           row.get("Name") or row.get("name"),
                 "code":           row.get("Code") or row.get("code"),

@@ -40,8 +40,9 @@ CREATE PROCEDURE dbo.WN_Bookings_GetListByUserId
         BEGIN
             DECLARE @UserGUID UNIQUEIDENTIFIER;
             SELECT @UserGUID = IdGUID FROM dbo.WN_Users WHERE Id = @UserId;
-
+            -- CHANGED: include booking GUID in result as idGuid
             SELECT 
+                b.IdGUID AS idGuid,
                 b.Id AS id,
                 st.Description AS spaceName,
                 b.StartDateTime AS startDateTime,
@@ -80,18 +81,21 @@ CREATE PROCEDURE dbo.WN_Bookings_Insert
         BEGIN
             DECLARE @UserGUID UNIQUEIDENTIFIER;
             DECLARE @SpaceGUID UNIQUEIDENTIFIER;
+            DECLARE @NewBookingGUID UNIQUEIDENTIFIER = NEWID();
 
             SELECT @UserGUID = IdGUID FROM dbo.WN_Users WHERE Id = @UserId;
             
-            -- Resolve Space Type GUID
+            -- Resolve Space GUID
             SELECT @SpaceGUID = SpaceTypeId FROM dbo.WN_Spaces WHERE Id = @SpaceId;
 
-            INSERT INTO dbo.WN_Bookings 
+            -- CHANGED: use a generated GUID variable so we can return it to the caller
+            INSERT INTO dbo.WN_BookINGS 
                 (IdGUID, BookingDate, UserGuid, SpaceGuid, StartDateTime, EndDateTime, TotalAmount, BookingStatus, Status, Notes, CreatedOn, CreatedBy)
             VALUES 
-                (NEWID(), GETDATE(), @UserGUID, @SpaceGUID, @StartDateTime, @EndDateTime, @TotalAmount, 1, 1, @Notes, GETDATE(), @UserGUID);
-                
-            SELECT SCOPE_IDENTITY() AS NewId;
+                (@NewBookingGUID, GETDATE(), @UserGUID, @SpaceGUID, @StartDateTime, @EndDateTime, @TotalAmount, 1, 1, @Notes, GETDATE(), @UserGUID);
+
+            -- Return both numeric id and GUID for caller convenience
+            SELECT SCOPE_IDENTITY() AS NewId, @NewBookingGUID AS NewIdGuid;
         END
 GO
 
@@ -122,7 +126,8 @@ CREATE PROCEDURE dbo.WN_BookTour_Insert
             INSERT INTO dbo.WN_BookTour (IdGUID, Name, Email, Message, PhoneNumber, CreatedOn, CreatedBy)
             VALUES (@NewGUID, @Name, @Email, @Message, @PhoneNumber, @Now, @UserGUID);
 
-            SELECT SCOPE_IDENTITY() AS NewId;
+            -- CHANGED: return both integer id and the generated GUID for the new contact/tour record
+            SELECT SCOPE_IDENTITY() AS NewId, @NewGUID AS NewIdGuid;
         END
 GO
 
@@ -136,11 +141,14 @@ GO
 CREATE PROCEDURE dbo.WN_GalleryImages_GetList
         AS
         BEGIN
+            -- CHANGED: include image GUID and explicit location GUID in results
             SELECT 
+                g.IdGUID AS idGuid,
                 g.Id AS id,
                 g.Title AS title,
                 g.Description AS description,
                 g.ImageUrl AS imageUrl,
+                g.LocationIdGuid AS locationIdGuid,
                 l.Name AS locationName
             FROM dbo.WN_GalleryImages g
             LEFT JOIN dbo.WN_Locations l ON g.LocationIdGuid = l.IdGUID
@@ -186,7 +194,9 @@ CREATE PROCEDURE dbo.WN_Payments_GetMyList
             DECLARE @UserGUID UNIQUEIDENTIFIER;
             SELECT @UserGUID = IdGUID FROM dbo.WN_Users WHERE Id = @UserId;
 
+            -- CHANGED: include payment GUID in results
             SELECT 
+                p.IdGUID AS idGuid,
                 p.Id AS id,
                 p.Amount AS amount,
                 p.PaymentMethod AS paymentMethod,
@@ -230,6 +240,9 @@ CREATE PROCEDURE dbo.WN_Payments_Insert
                 (UserId, BookingId, Amount, Currency, PaymentMethod, PaymentStatus, TransactionRef, PaidAt, CreatedAt)
             VALUES 
                 (@UserGUID, @BookingGUID, @Amount, 'PKR', @PaymentMethod, 'Paid', @TransactionRef, GETDATE(), GETDATE());
+
+            -- CHANGED: return new payment id and attempt to return its GUID if present
+            SELECT SCOPE_IDENTITY() AS NewId, (SELECT IdGUID FROM dbo.WN_Payments WHERE Id = SCOPE_IDENTITY()) AS NewIdGuid;
         END
 GO
 
@@ -243,15 +256,17 @@ GO
 CREATE PROCEDURE [dbo].[WN_PricingPlans_GetList]
 AS
  BEGIN
-	SELECT 
-	p.Id,
-	p.[Name],
+    -- CHANGED: include GUID for pricing plans if present
+    SELECT 
+    p.IdGUID AS idGuid,
+    p.Id,
+    p.[Name],
     ISNULL(p.[Price], 0) AS [Price],
-	p.[Description],
-	f.FeatureName
-	FROM dbo.WN_PricingPlans p with(nolock)
-	LEFT JOIN dbo.WN_PlanFeatures f with(nolock) ON p.Id = f.PlanId
-	WHERE p.IsActive = 1;
+ 	p.[Description],
+ 	f.FeatureName
+    FROM dbo.WN_PricingPlans p with(nolock)
+    LEFT JOIN dbo.WN_PlanFeatures f with(nolock) ON p.Id = f.PlanId
+    WHERE p.IsActive = 1;
  END
 GO
 
@@ -266,19 +281,23 @@ CREATE PROCEDURE [dbo].[WN_Spaces_GetList]
 AS
 BEGIN
 SELECT 
-	s.Id,
-	s.[Name],
-	l.[Name] AS LocationName,
-	st.[Description] AS SpaceTypeName,
-	st.Capacity,
-	s.PricePerDay,
+    -- CHANGED: include GUIDs for spaces and their related entities
+    s.IdGUID AS idGuid,
+    s.Id,
+    s.[Name],
+    l.IdGUID AS locationIdGuid,
+    l.[Name] AS LocationName,
+    st.IdGUID AS spaceTypeIdGuid,
+    st.[Description] AS SpaceTypeName,
+    st.Capacity,
+    s.PricePerDay,
     s.pricePerHour,
-	s.Amenities,
-	s.ImageUrl,
-	(CASE 
-	WHEN s.Status = 1 THEN 'available'
-	ELSE 'inactive'
-	END) AS [Status]
+    s.Amenities,
+    s.ImageUrl,
+    (CASE 
+    WHEN s.Status = 1 THEN 'available'
+    ELSE 'inactive'
+    END) AS [Status]
 	FROM dbo.WN_Spaces s
 	LEFT JOIN dbo.WN_Locations l with(nolock) ON s.LocationId = l.IdGUID
 	LEFT JOIN dbo.WN_SpaceTypes st  with(nolock) ON s.SpaceTypeId = st.IdGUID;
@@ -321,7 +340,8 @@ CREATE PROCEDURE [dbo].[WN_Users_GetByEmail]
     @Email NVARCHAR(256)
 AS
 BEGIN
-    SELECT Id FROM dbo.WN_Users WHERE Email = @Email;
+    -- CHANGED: return both numeric id and GUID for user lookup
+    SELECT Id, IdGUID FROM dbo.WN_Users WHERE Email = @Email;
 END
 GO
 
@@ -368,15 +388,17 @@ CREATE PROCEDURE [dbo].[WN_Users_Insert]
                 END
                 ELSE
                 BEGIN
+                    -- CHANGED: generate and return user GUID along with numeric id
+                    DECLARE @NewUserGUID UNIQUEIDENTIFIER = NEWID();
                     INSERT INTO dbo.WN_Users 
                         (IdGUID, Name, CreatedOn, UserName, Email, PhoneNumber)
                     VALUES 
-                        (NEWID(), LTRIM(RTRIM(ISNULL(@FirstName, '') + ' ' + ISNULL(@LastName, ''))), GETDATE(), @UserName, @Email, @PhoneNumber);
+                        (@NewUserGUID, LTRIM(RTRIM(ISNULL(@FirstName, '') + ' ' + ISNULL(@LastName, ''))), GETDATE(), @UserName, @Email, @PhoneNumber);
                     
                     SELECT @NewId = SCOPE_IDENTITY();
                     
                     COMMIT TRANSACTION;
-                    SELECT @NewId AS NewId;
+                    SELECT @NewId AS NewId, @NewUserGUID AS NewIdGuid;
                 END
             END
         END
@@ -415,7 +437,9 @@ GO
 CREATE PROCEDURE dbo.WN_Users_GetList
 AS
 BEGIN
+    -- CHANGED: include user GUID in list results
     SELECT
+        u.IdGUID       AS idGuid,
         u.Id           AS id,
         u.Email        AS email,
         u.Name         AS firstName,
@@ -436,7 +460,9 @@ GO
 CREATE PROCEDURE dbo.WN_Bookings_GetList
 AS
 BEGIN
+    -- CHANGED: include booking GUID and ensure join uses space IdGUID
     SELECT
+        b.IdGUID            AS idGuid,
         b.Id                AS id,
         u.Email             AS userEmail,
         s.Name              AS spaceName,
@@ -453,7 +479,8 @@ BEGIN
         END AS bookingStatus
     FROM dbo.WN_Bookings b WITH (NOLOCK)
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK)  ON b.UserGuid  = u.IdGUID
-    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON b.SpaceGuid = s.SpaceTypeId
+    -- CHANGED: join spaces by their GUID (SpaceGuid -> s.IdGUID)
+    LEFT JOIN dbo.WN_Spaces s WITH (NOLOCK) ON b.SpaceGuid = s.IdGUID
     WHERE b.Status = 1
     ORDER BY b.BookingDate DESC;
 END
@@ -469,7 +496,9 @@ GO
 CREATE PROCEDURE dbo.WN_Payments_GetList
 AS
 BEGIN
+    -- CHANGED: include payment GUID in list results
     SELECT
+        p.IdGUID            AS idGuid,
         p.Id                AS id,
         u.Email             AS userEmail,
         p.Amount            AS amount,
@@ -477,7 +506,7 @@ BEGIN
         p.PaymentStatus     AS paymentStatus,
         p.TransactionRef    AS transactionRef,
         p.PaidAt            AS paidAt
-    FROM dbo.WN_Payments p WITH (NOLOCK)
+    FROM dbo.WN_PayMENTS p WITH (NOLOCK)
     LEFT JOIN dbo.WN_Users u WITH (NOLOCK) ON p.UserId = u.IdGUID
     ORDER BY p.PaidAt DESC;
 END
@@ -493,7 +522,9 @@ GO
 CREATE PROCEDURE dbo.WN_Contacts_GetList
 AS
 BEGIN
+    -- CHANGED: include GUID for contact/book tour records
     SELECT
+        b.IdGUID        AS idGuid,
         b.Id            AS id,
         b.Name          AS fullName,
         b.Email         AS email,
@@ -507,7 +538,6 @@ END
 GO
 
 -- --------------------------------------------------------
-<<<<<<< HEAD
 -- Stored Procedure: dbo.WN_Payments_UpdateStatusByRef
 -- --------------------------------------------------------
 IF OBJECT_ID('dbo.WN_Payments_UpdateStatusByRef', 'P') IS NOT NULL
@@ -527,8 +557,6 @@ END
 GO
 
 -- --------------------------------------------------------
-=======
->>>>>>> 17ca6d2c8411ef47f069622c6607470f02b62926
 -- Stored Procedure: dbo.WN_Memberships_GetList
 -- --------------------------------------------------------
 IF OBJECT_ID('dbo.WN_Memberships_GetList', 'P') IS NOT NULL

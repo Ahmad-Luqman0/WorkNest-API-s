@@ -1,6 +1,11 @@
 import pymssql
 import os
 
+try:
+    from api.roles import map_role
+except ImportError:
+    from roles import map_role
+
 env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(env_path):
     with open(env_path, "r") as f:
@@ -49,25 +54,29 @@ def _iso(val):
     return val.isoformat() if val and hasattr(val, "isoformat") else val
 
 
-def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> int:
+def sync_user(email: str, first_name: str, last_name: str, phone: str = None) -> tuple:
+    """Returns (numeric_id, guid) tuple. Never returns None for id."""
     if not email:
-        return 1
+        return (1, None)
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(SP_GET_USER_BY_EMAIL, (email,))
         row = cursor.fetchone()
         if row:
-            user_id = row[0]
+            # SP returns Id, IdGUID
+            user_id  = row[0]
+            user_guid = str(row[1]) if row[1] else None
             cursor.execute(SP_UPDATE_USER, (first_name, last_name, phone, user_id))
             conn.commit()
-            return user_id
+            return (user_id, user_guid)
         else:
             cursor.execute(SP_INSERT_USER, (first_name, last_name, email, email, phone))
             row = cursor.fetchone()
-            new_id = row[0] if row else None
+            new_id   = row[0] if row else None
+            new_guid = str(row[1]) if (row and len(row) > 1 and row[1]) else None
             conn.commit()
-            return new_id
+            return (new_id, new_guid)
     except Exception as e:
         conn.rollback()
         raise e
@@ -75,20 +84,21 @@ def sync_user(email: str, first_name: str, last_name: str, phone: str = None) ->
         conn.close()
 
 
-def get_user_id_by_email(email: str):
+def get_user_id_by_email(email: str) -> tuple:
+    """Returns (numeric_id, guid) tuple."""
     if not email:
-        return None
+        return (None, None)
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(SP_GET_USER_BY_EMAIL, (email,))
         row = cursor.fetchone()
         if row:
-            return row[0]
+            return (row[0], str(row[1]) if row[1] else None)
         default_name = email.split("@")[0]
         return sync_user(email, default_name, "")
     except Exception:
-        return None
+        return (None, None)
     finally:
         conn.close()
 
@@ -382,20 +392,29 @@ def get_all_users():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_ALL_USERS)
+        # Fetch users with their Roles column for role mapping
+        cursor.execute("""
+            SELECT u.IdGUID AS idGuid, u.Id AS id, u.Email AS email,
+                   u.Name AS firstName, u.PhoneNumber AS phone,
+                   u.CreatedOn AS createdAt, u.IsActive AS isActive,
+                   u.Roles AS roles_int
+            FROM dbo.WN_Users u WITH (NOLOCK)
+            ORDER BY u.CreatedOn DESC
+        """)
         rows = cursor.fetchall()
+        result = []
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
-            row["createdAt"] = _iso(row.get("createdAt") or row.get("CreatedAt"))
-            first = row.get("firstName") or row.get("FirstName") or ""
-            last  = row.get("lastName")  or row.get("LastName")  or ""
-            row["name"] = first if first else (f"{first} {last}".strip() or row.get("email") or "")
-            if row.get("isActive") is None and row.get("IsActive") is None:
-                row["isActive"] = True
-            elif "IsActive" in row:
-                row["isActive"] = bool(row["IsActive"])
-        return rows
+            result.append({
+                "idGuid":    str(row["idGuid"]) if row.get("idGuid") else None,
+                "id":        str(row["idGuid"]) if row.get("idGuid") else str(row.get("id", "")),
+                "email":     row.get("email") or "",
+                "name":      row.get("firstName") or "",
+                "phone":     row.get("phone") or "",
+                "createdAt": _iso(row.get("createdAt")),
+                "isActive":  bool(row.get("isActive")) if row.get("isActive") is not None else True,
+                "role":      map_role(row.get("roles_int")),
+            })
+        return result
     except Exception as e:
         raise e
     finally:

@@ -138,13 +138,14 @@ def get_all_spaces():
         result = []
         for row in rows:
             price_val = row.get("PricePerDay") or row.get("pricePerDay")
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
             result.append({
-                "idGuid":         row.get("IdGUID") or row.get("idGuid"),
-                "id":             row.get("Id") or row.get("id"),
+                "id":             guid,
+                "idGuid":         guid,
                 "name":           row.get("Name") or row.get("name"),
                 "code":           row.get("Code") or row.get("code"),
-                "locationIdGuid": row.get("LocationIdGuid") or row.get("locationIdGuid"),
-                "spaceTypeIdGuid":row.get("SpaceTypeIdGuid") or row.get("spaceTypeIdGuid"),
+                "locationIdGuid": str(row.get("LocationIdGuid") or ""),
+                "spaceTypeIdGuid":str(row.get("SpaceTypeIdGuid") or ""),
                 "locationName":   row.get("LocationName") or row.get("locationName"),
                 "spaceTypeName":  row.get("SpaceTypeName") or row.get("spaceTypeName"),
                 "capacity":       row.get("Capacity") or row.get("capacity"),
@@ -169,8 +170,9 @@ def get_gallery_images():
         cursor.execute(SP_GET_GALLERY_IMAGES)
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
         return rows
     except Exception as e:
         raise e
@@ -191,12 +193,16 @@ def get_pricing_plans():
                 continue
             if plan_id not in plans_dict:
                 price_val = row.get("Price") or row.get("price")
+                guid = str(row.get("IdGUID") or row.get("idGuid") or "")
                 plans_dict[plan_id] = {
-                    "idGuid":      row.get("IdGUID") or row.get("idGuid"),
-                    "id":          plan_id,
+                    "id":          guid,
+                    "idGuid":      guid,
                     "name":        row.get("Name") or row.get("name"),
                     "price":       float(price_val) if price_val is not None else 0.0,
                     "description": row.get("Description") or row.get("description") or "",
+                    "billingCycle": row.get("BillingCycle") or row.get("billingCycle") or "",
+                    "includesHours": row.get("IncludesHours") or row.get("includesHours") or 0,
+                    "isActive":    bool(row.get("IsActive") or row.get("isActive")),
                     "features":    [],
                 }
             feature_name = row.get("FeatureName") or row.get("featureName")
@@ -310,9 +316,9 @@ def get_all_locations():
         cursor.execute(SP_GET_ALL_LOCATIONS)
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
-            # Map Name to name if needed
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
             if "Name" in row and "name" not in row:
                 row["name"] = row["Name"]
             status = row.get("status") or row.get("Status") or row.get("IsActive") or row.get("isActive")
@@ -348,7 +354,7 @@ def get_booking_by_id(user_id: int, booking_id: int):
                 END AS bookingStatus
             FROM dbo.WN_Bookings b
             LEFT JOIN dbo.WN_SpaceTypes st ON b.SpaceGuid = st.IdGUID
-            WHERE b.Id = %d AND b.UserGuid = %s AND b.Status = 1
+            WHERE b.Id = %d AND b.UserGuid = %s
         """
         cursor.execute(query, (booking_id, user_guid))
         res = cursor.fetchone()
@@ -392,26 +398,25 @@ def get_all_users():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        # Fetch users with their Roles column for role mapping
         cursor.execute("""
-            SELECT u.IdGUID AS idGuid, u.Id AS id, u.Email AS email,
-                   u.Name AS firstName, u.PhoneNumber AS phone,
-                   u.CreatedOn AS createdAt, u.IsActive AS isActive,
-                   u.Roles AS roles_int
+            SELECT u.IdGUID AS idGuid, u.Id AS numericId, u.Email AS email,
+                   u.Name AS name, u.PhoneNumber AS phone,
+                   u.CreatedOn AS createdAt, u.RoleId AS roles_int
             FROM dbo.WN_Users u WITH (NOLOCK)
             ORDER BY u.CreatedOn DESC
         """)
         rows = cursor.fetchall()
         result = []
         for row in rows:
+            guid = str(row["idGuid"]) if row.get("idGuid") else ""
             result.append({
-                "idGuid":    str(row["idGuid"]) if row.get("idGuid") else None,
-                "id":        str(row["idGuid"]) if row.get("idGuid") else str(row.get("id", "")),
+                "id":        guid,
+                "idGuid":    guid,
                 "email":     row.get("email") or "",
-                "name":      row.get("firstName") or "",
+                "name":      row.get("name") or "",
                 "phone":     row.get("phone") or "",
                 "createdAt": _iso(row.get("createdAt")),
-                "isActive":  bool(row.get("isActive")) if row.get("isActive") is not None else True,
+                "isActive":  True,
                 "role":      map_role(row.get("roles_int")),
             })
         return result
@@ -428,8 +433,9 @@ def get_all_bookings():
         cursor.execute(SP_GET_ALL_BOOKINGS)
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
             amount = row.get("totalAmount") or row.get("TotalAmount") or row.get("Total_Amount") or 0
             row["totalAmount"]   = float(amount) if amount is not None else 0.0
             row["startDateTime"] = _iso(row.get("startDateTime") or row.get("StartDateTime"))
@@ -452,8 +458,9 @@ def get_all_payments():
         cursor.execute(SP_GET_ALL_PAYMENTS)
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
             if row.get("amount") is not None:
                 row["amount"] = float(row["amount"])
             row["paidAt"] = _iso(row.get("paidAt"))
@@ -471,8 +478,8 @@ def get_all_space_types():
         cursor.execute(SP_GET_ALL_SPACE_TYPES)
         rows = cursor.fetchall()
         return [{
-            "idGuid":       row.get("IdGUID") or row.get("idGuid"),
-            "id":           row.get("Id") or row.get("id"),
+            "id":           str(row.get("IdGUID") or row.get("idGuid") or ""),
+            "idGuid":       str(row.get("IdGUID") or row.get("idGuid") or ""),
             "name":         row.get("Description") or row.get("description") or row.get("Name") or row.get("name"),
             "capacity":     row.get("Capacity") or row.get("capacity"),
             "hourlyAllowed":row.get("HourlyAllowed") or row.get("hourlyAllowed"),
@@ -491,8 +498,9 @@ def get_all_contacts():
         cursor.execute(SP_GET_ALL_CONTACTS)
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
+            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
             row["createdAt"] = _iso(row.get("createdAt"))
         return rows
     except Exception as e:
@@ -506,7 +514,7 @@ def get_all_memberships():
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute("""
-            SELECT m.IdGUID AS idGuid, m.Id AS id, u.Email AS userEmail,
+            SELECT m.IdGUID AS idGuid, m.Id AS numericId, u.Email AS userEmail,
                    pp.Name AS planName, pp.Price AS planPrice, pp.BillingCycle AS planCycle,
                    m.StartDate AS startDate, m.EndDate AS endDate, m.Status AS status
             FROM dbo.WN_Memberships m
@@ -516,6 +524,9 @@ def get_all_memberships():
         """)
         rows = cursor.fetchall()
         for row in rows:
+            guid = str(row.get("idGuid") or "")
+            row["id"] = guid
+            row["idGuid"] = guid
             row["startDate"] = _iso(row.get("startDate"))
             row["endDate"]   = _iso(row.get("endDate"))
             row["planPrice"] = float(row["planPrice"]) if row.get("planPrice") else 0.0

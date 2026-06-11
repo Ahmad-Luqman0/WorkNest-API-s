@@ -77,7 +77,7 @@ app = FastAPI(title="WorkNest API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -241,6 +241,34 @@ class UserCreateRequest(BaseModel):
     password: Optional[str] = None
 
 
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/dashboard/summary")
+@app.get("/dashboard/summary")
+def get_dashboard_summary():
+    try:
+        users     = get_all_users()
+        spaces    = get_all_spaces()
+        bookings  = get_all_bookings()
+        contacts  = get_all_contacts()
+        locations = get_all_locations()
+        plans     = get_pricing_plans()
+        gallery   = get_gallery_images()
+        members   = get_all_memberships()
+        return ok({
+            "users":       len(users),
+            "spaces":      len(spaces),
+            "bookings":    len(bookings),
+            "contacts":    len(contacts),
+            "locations":   len(locations),
+            "plans":       len(plans),
+            "gallery":     len(gallery),
+            "memberships": len(members),
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Root ──────────────────────────────────────────────────────────────────────
 
 @app.get("/")
@@ -262,6 +290,39 @@ def register_user(payload: UserRegisterRequest):
     user_id, user_guid = sync_user(payload.email, payload.firstName or "", payload.lastName or "", payload.phone)
     return ok({"id": user_guid or user_id, "email": payload.email}, "User registered successfully.")
 
+@app.get("/api/auth/me")
+@app.get("/auth/me")
+def get_me(x_user_email: Optional[str] = Header(None)):
+    if not x_user_email:
+        raise HTTPException(status_code=401, detail="User email header required")
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(
+            "SELECT IdGUID, Email, Name, PhoneNumber, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s",
+            (x_user_email,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        return ok({
+            "id":    str(row["IdGUID"]) if row.get("IdGUID") else None,
+            "email": row.get("Email") or "",
+            "name":  row.get("Name") or "",
+            "phone": row.get("PhoneNumber") or "",
+            "role":  map_role(row.get("RoleId")),
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/auth/logout")
+@app.post("/auth/logout")
+def logout_user():
+    return ok(message="Logged out successfully.")
+
 @app.post("/api/auth/login")
 @app.post("/auth/login")
 def login_user(payload: UserLoginRequest):
@@ -269,18 +330,17 @@ def login_user(payload: UserLoginRequest):
         conn = get_connection()
         cursor = conn.cursor(as_dict=True)
         cursor.execute(
-            "SELECT Id, IdGUID, Email, Roles FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s AND Status = 1",
+            "SELECT Id, IdGUID, Email, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s",
             (payload.email,)
         )
         row = cursor.fetchone()
         conn.close()
         if not row:
-            # Auto-provision on first login
             user_id, user_guid = sync_user(payload.email, "", "")
-            return ok({"id": user_guid or user_id, "email": payload.email, "role": map_role(None)}, "Login successful.")
+            return ok({"id": user_guid or user_id, "email": payload.email, "roles": [map_role(None)]}, "Login successful.")
         guid = str(row["IdGUID"]) if row.get("IdGUID") else None
-        role = map_role(row.get("Roles"))
-        return ok({"id": guid, "email": row["Email"], "role": role}, "Login successful.")
+        role = map_role(row.get("RoleId"))
+        return ok({"id": guid, "email": row["Email"], "roles": [role]}, "Login successful.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -291,17 +351,17 @@ def google_login_user(payload: GoogleLoginRequest):
         conn = get_connection()
         cursor = conn.cursor(as_dict=True)
         cursor.execute(
-            "SELECT Id, IdGUID, Email, Roles FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s AND Status = 1",
+            "SELECT Id, IdGUID, Email, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s",
             (payload.email,)
         )
         row = cursor.fetchone()
         conn.close()
         if row:
             guid = str(row["IdGUID"]) if row.get("IdGUID") else None
-            role = map_role(row.get("Roles"))
-            return ok({"id": guid, "email": row["Email"], "role": role}, "Google login successful.")
+            role = map_role(row.get("RoleId"))
+            return ok({"id": guid, "email": row["Email"], "roles": [role]}, "Google login successful.")
         user_id, user_guid = sync_user(payload.email, payload.firstName or "", payload.lastName or "")
-        return ok({"id": user_guid or user_id, "email": payload.email, "role": map_role(None)}, "Google login successful.")
+        return ok({"id": user_guid or user_id, "email": payload.email, "roles": [map_role(None)]}, "Google login successful.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -328,18 +388,17 @@ def get_user(id: str):
         guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
         if guid_pattern.match(id):
             cursor.execute(
-                "SELECT IdGUID, Email, Name, PhoneNumber, IsActive, CreatedOn, Roles FROM dbo.WN_Users WITH (NOLOCK) WHERE IdGUID = %s AND Status = 1",
+                "SELECT IdGUID, Email, Name, PhoneNumber, CreatedOn, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE IdGUID = %s",
                 (id,)
             )
         elif "@" in id:
             cursor.execute(
-                "SELECT IdGUID, Email, Name, PhoneNumber, IsActive, CreatedOn, Roles FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s AND Status = 1",
+                "SELECT IdGUID, Email, Name, PhoneNumber, CreatedOn, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s",
                 (id,)
             )
         else:
-            # Legacy numeric id — internal fallback only
             cursor.execute(
-                "SELECT IdGUID, Email, Name, PhoneNumber, IsActive, CreatedOn, Roles FROM dbo.WN_Users WITH (NOLOCK) WHERE Id = %d AND Status = 1",
+                "SELECT IdGUID, Email, Name, PhoneNumber, CreatedOn, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE Id = %d",
                 (int(id),)
             )
         row = cursor.fetchone()
@@ -351,9 +410,9 @@ def get_user(id: str):
             "email":     row.get("Email") or "",
             "firstName": row.get("Name") or "",
             "phone":     row.get("PhoneNumber") or "",
-            "isActive":  bool(row.get("IsActive")),
+            "isActive":  True,
             "createdAt": _iso(row.get("CreatedOn")),
-            "role":      map_role(row.get("Roles")),
+            "role":      map_role(row.get("RoleId")),
         })
     except HTTPException:
         raise
@@ -395,7 +454,7 @@ def get_user_history(id: str):
                    END AS bookingStatus
             FROM dbo.WN_Bookings b
             LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-            WHERE b.UserGuid = %s AND b.Status = 1
+            WHERE b.UserGuid = %s
             ORDER BY b.StartDateTime DESC
         """, (user_guid,))
         bookings = cursor.fetchall()
@@ -409,7 +468,8 @@ def get_user_history(id: str):
             SELECT p.IdGUID AS id, p.Amount AS amount, p.PaymentMethod AS paymentMethod,
                    p.PaymentStatus AS paymentStatus, p.PaidAt AS paidAt
             FROM dbo.WN_Payments p
-            WHERE p.UserId = %s
+            INNER JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
+            WHERE b.UserGuid = %s
             ORDER BY p.PaidAt DESC
         """, (user_guid,))
         payments = cursor.fetchall()
@@ -445,13 +505,29 @@ def create_user(payload: UserCreateRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.put("/api/user/{id}")
+@app.put("/user/{id}")
+def update_user(id: str, payload: UserSyncRequest):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE dbo.WN_Users SET Name=%s, PhoneNumber=%s WHERE IdGUID=%s",
+            (f"{payload.firstName or ''} {payload.lastName or ''}".strip(), payload.phone, id)
+        )
+        conn.commit()
+        conn.close()
+        return ok(message="User updated.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/user/{id}")
 @app.delete("/user/{id}")
 def delete_user(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Users SET Status = 0 WHERE IdGUID = %s", (id,))
+        cursor.execute("UPDATE dbo.WN_Users SET IsActive = 0 WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="User deleted.")
@@ -464,7 +540,7 @@ def activate_user(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Users SET IsActive = 1 WHERE IdGUID = %s", (id,))
+        cursor.execute("UPDATE dbo.WN_Users SET Status = 1 WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="User activated.")
@@ -477,7 +553,7 @@ def deactivate_user(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Users SET IsActive = 0 WHERE IdGUID = %s", (id,))
+        cursor.execute("UPDATE dbo.WN_Users SET Status = 0 WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="User deactivated.")
@@ -496,9 +572,9 @@ def update_user_role(id: str, body: dict):
         conn = get_connection()
         cursor = conn.cursor()
         if role_int is not None:
-            cursor.execute("UPDATE dbo.WN_Users SET Roles = %d WHERE IdGUID = %s", (role_int, id))
+            cursor.execute("UPDATE dbo.WN_Users SET RoleId = %d WHERE IdGUID = %s", (role_int, id))
         else:
-            cursor.execute("UPDATE dbo.WN_Users SET Role = %s WHERE IdGUID = %s", (role, id))
+            cursor.execute("UPDATE dbo.WN_Users SET RoleId = %d WHERE IdGUID = %s", (14, id))
         conn.commit()
         conn.close()
         return ok(message="Role updated.")
@@ -621,6 +697,15 @@ def delete_space_type(id: str):
 
 # ── Spaces ────────────────────────────────────────────────────────────────────
 
+@app.get("/api/space/available")
+@app.get("/space/available")
+def list_available_spaces():
+    try:
+        spaces = get_all_spaces()
+        return paginate([s for s in spaces if s.get("spaceStatus") == "Available"], 1, 1000)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/space")
 @app.get("/space")
 def list_spaces(page: int = Query(1), limit: int = Query(10), search: str = Query("")):
@@ -702,7 +787,7 @@ def get_space_summary(id: str):
                    CASE b.BookingStatus WHEN 2 THEN 'Cancelled' WHEN 3 THEN 'Rejected' ELSE 'Confirmed' END AS bookingStatus
             FROM dbo.WN_Bookings b
             LEFT JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
-            WHERE b.SpaceGuid = %s AND b.Status = 1
+            WHERE b.SpaceGuid = %s
             ORDER BY b.StartDateTime DESC
         """, (id,))
         reservations = cursor.fetchall()
@@ -775,7 +860,7 @@ def booking_calendar(spaceId: int = Query(...), year: int = Query(...), month: i
                    CONVERT(varchar, b.EndDateTime, 23) AS endDate
             FROM dbo.WN_Bookings b
             INNER JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-            WHERE s.Id = %d AND b.Status = 1
+            WHERE s.Id = %d AND b.BookingStatus != 2
               AND YEAR(b.StartDateTime) = %d AND MONTH(b.StartDateTime) = %d
         """, (spaceId, year, month))
         rows = cursor.fetchall()
@@ -853,7 +938,13 @@ def cancel_my_booking(id: str, x_user_email: Optional[str] = Header(None)):
             raise HTTPException(status_code=404, detail="User not found")
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("SELECT Id FROM dbo.WN_Bookings WITH (NOLOCK) WHERE IdGUID = %s", (id,))
+        # Accept both numeric id and GUID
+        import re
+        guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        if guid_pattern.match(id):
+            cursor.execute("SELECT Id FROM dbo.WN_Bookings WITH (NOLOCK) WHERE IdGUID = %s", (id,))
+        else:
+            cursor.execute("SELECT Id FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = %d", (int(id),))
         row = cursor.fetchone()
         conn.close()
         numeric_id = row[0] if row else None
@@ -1061,7 +1152,7 @@ def get_membership_summary(id: int):
         cursor.execute("""
             SELECT Id AS id, Amount AS amount, PaymentMethod AS paymentMethod,
                    PaymentStatus AS paymentStatus, PaidAt AS paidAt, CreatedAt AS createdAt
-            FROM dbo.WN_Payments WHERE MembershipId = %d AND Status = 1
+            FROM dbo.WN_Payments WHERE MembershipId = %d
             ORDER BY CreatedAt DESC
         """, (id,))
         payments = cursor.fetchall()
@@ -1114,12 +1205,14 @@ def list_all_payments(page: int = Query(1), limit: int = Query(10), search: str 
 @app.get("/payment/my")
 def list_my_payments(x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = DEFAULT_USER_ID
-        if x_user_email:
-            resolved = get_user_id_by_email(x_user_email)
-            if resolved:
-                user_id = resolved
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+        user_id, _ = get_user_id_by_email(x_user_email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="User not found")
         return get_my_payments(user_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1127,27 +1220,29 @@ def list_my_payments(x_user_email: Optional[str] = Header(None)):
 @app.post("/payment", status_code=201)
 def create_payment_endpoint(payload: PaymentCreateRequest, x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = DEFAULT_USER_ID
-        if x_user_email:
-            resolved = get_user_id_by_email(x_user_email)
-            if resolved:
-                user_id = resolved
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+        user_id, _ = get_user_id_by_email(x_user_email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="User not found")
         ref = f"ADM-{random.randint(100000, 999999)}"
         create_payment(user_id, payload.membershipId or 0, payload.amount, payload.paymentMethod, ref)
         return ok(message="Payment created.")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/api/payment/{id}/status")
 @app.patch("/payment/{id}/status")
-def update_payment_status_endpoint(id: int, status: str = Query(...), transactionRef: Optional[str] = Query(None)):
+def update_payment_status_endpoint(id: str, status: str = Query(...), transactionRef: Optional[str] = Query(None)):
     try:
         conn = get_connection()
         cursor = conn.cursor()
         if transactionRef:
             cursor.execute("UPDATE dbo.WN_Payments SET PaymentStatus=%s WHERE TransactionRef=%s", (status, transactionRef))
         else:
-            cursor.execute("UPDATE dbo.WN_Payments SET PaymentStatus=%s WHERE Id=%d", (status, id))
+            cursor.execute("UPDATE dbo.WN_Payments SET PaymentStatus=%s WHERE IdGUID=%s", (status, id))
         conn.commit()
         conn.close()
         return ok(message="Payment status updated.")
@@ -1156,11 +1251,11 @@ def update_payment_status_endpoint(id: int, status: str = Query(...), transactio
 
 @app.delete("/api/payment/{id}")
 @app.delete("/payment/{id}")
-def delete_payment(id: int):
+def delete_payment(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Payments SET Status = 0 WHERE Id = %d", (id,))
+        cursor.execute("UPDATE dbo.WN_Payments SET PaymentStatus = 'Deleted' WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="Payment deleted.")
@@ -1169,26 +1264,26 @@ def delete_payment(id: int):
 
 @app.get("/api/payment/{id}/summary")
 @app.get("/payment/{id}/summary")
-def get_payment_summary(id: int):
+def get_payment_summary(id: str):
     try:
         payments = get_all_payments()
-        payment = next((p for p in payments if p.get("id") == id), None)
+        payment = next((p for p in payments if str(p.get("idGuid") or p.get("id")) == str(id)), None)
         if not payment:
             raise HTTPException(status_code=404, detail="Payment not found")
         conn = get_connection()
         cursor = conn.cursor(as_dict=True)
         cursor.execute("""
-            SELECT Id AS id, Amount AS amount, PaymentMethod AS paymentMethod,
-                   PaymentStatus AS paymentStatus, PaidAt AS paidAt, CreatedAt AS createdAt
-            FROM dbo.WN_Payments WHERE UserId = (
-                SELECT UserId FROM dbo.WN_Payments WHERE Id = %d
-            ) AND Status = 1 ORDER BY CreatedAt DESC
+            SELECT p.IdGUID AS id, p.Amount AS amount, p.PaymentMethod AS paymentMethod,
+                   p.PaymentStatus AS paymentStatus, p.PaidAt AS paidAt
+            FROM dbo.WN_Payments p
+            WHERE p.UserId = (SELECT UserId FROM dbo.WN_Payments WHERE IdGUID = %s)
+            ORDER BY p.PaidAt DESC
         """, (id,))
         user_payments = cursor.fetchall()
         for p in user_payments:
+            p["id"] = str(p["id"]) if p.get("id") else None
             p["amount"] = float(p["amount"]) if p.get("amount") else 0.0
             p["paidAt"] = _iso(p.get("paidAt"))
-            p["createdAt"] = _iso(p.get("createdAt"))
         conn.close()
         paid_total = sum(p["amount"] for p in user_payments if p.get("paymentStatus") == "Paid")
         return ok({
@@ -1228,7 +1323,7 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
     try:
         user_id = None
         if x_user_email:
-            user_id = get_user_id_by_email(x_user_email)
+            user_id, _ = get_user_id_by_email(x_user_email)
         new_id = book_tour(payload.fullName, payload.email, payload.message, payload.phone, user_id)
         return ok({"id": new_id, "fullName": payload.fullName, "email": payload.email}, "Contact recorded.")
     except Exception as e:
@@ -1236,11 +1331,11 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
 
 @app.patch("/api/contact/{id}/status")
 @app.patch("/contact/{id}/status")
-def update_contact_status(id: int, status: str = Query(...)):
+def update_contact_status(id: str, status: str = Query(...)):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Contacts SET Status = %s WHERE Id = %d", (status, id))
+        cursor.execute("UPDATE dbo.WN_BookTour SET Status = %s WHERE IdGUID = %s", (status, id))
         conn.commit()
         conn.close()
         return ok(message="Contact status updated.")
@@ -1249,11 +1344,11 @@ def update_contact_status(id: int, status: str = Query(...)):
 
 @app.delete("/api/contact/{id}")
 @app.delete("/contact/{id}")
-def delete_contact(id: int):
+def delete_contact(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_Contacts SET Status = 0 WHERE Id = %d", (id,))
+        cursor.execute("UPDATE dbo.WN_BookTour SET Status = 0 WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="Contact deleted.")
@@ -1278,8 +1373,8 @@ def create_gallery_image(payload: GalleryUpsertRequest):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO dbo.WN_GalleryImages (Title, ImageUrl, SortOrder, IsActive, Status)
-            VALUES (%s, %s, %d, %d, 1); SELECT SCOPE_IDENTITY() AS id
+            INSERT INTO dbo.WN_GalleryImages (Title, ImageUrl, SortOrder, IsActive)
+            VALUES (%s, %s, %d, %d); SELECT SCOPE_IDENTITY() AS id
         """, (payload.title, payload.imageUrl, payload.sortOrder or 0, 1 if payload.isActive else 0))
         row = cursor.fetchone()
         conn.commit()
@@ -1290,12 +1385,12 @@ def create_gallery_image(payload: GalleryUpsertRequest):
 
 @app.put("/api/gallery/{id}")
 @app.put("/gallery/{id}")
-def update_gallery_image(id: int, payload: GalleryUpsertRequest):
+def update_gallery_image(id: str, payload: GalleryUpsertRequest):
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE dbo.WN_GalleryImages SET Title=%s, ImageUrl=%s, SortOrder=%d, IsActive=%d WHERE Id=%d
+            UPDATE dbo.WN_GalleryImages SET Title=%s, ImageUrl=%s, SortOrder=%d, IsActive=%d WHERE IdGUID=%s
         """, (payload.title, payload.imageUrl, payload.sortOrder or 0, 1 if payload.isActive else 0, id))
         conn.commit()
         conn.close()
@@ -1305,11 +1400,11 @@ def update_gallery_image(id: int, payload: GalleryUpsertRequest):
 
 @app.delete("/api/gallery/{id}")
 @app.delete("/gallery/{id}")
-def delete_gallery_image(id: int):
+def delete_gallery_image(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_GalleryImages SET Status = 0 WHERE Id = %d", (id,))
+        cursor.execute("UPDATE dbo.WN_GalleryImages SET IsActive = 0 WHERE IdGUID = %s", (id,))
         conn.commit()
         conn.close()
         return ok(message="Gallery image deleted.")
@@ -1323,11 +1418,11 @@ def delete_gallery_image(id: int):
 @app.post("/payment/card")
 def process_card_payment(payload: CardPaymentRequest, x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = DEFAULT_USER_ID
-        if x_user_email:
-            resolved = get_user_id_by_email(x_user_email)
-            if resolved:
-                user_id = resolved
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+        user_id, _ = get_user_id_by_email(x_user_email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="User not found")
         booking_data = get_booking_by_id(user_id, payload.bookingId)
         if not booking_data:
             raise HTTPException(status_code=404, detail="Booking not found")
@@ -1344,22 +1439,18 @@ def process_card_payment(payload: CardPaymentRequest, x_user_email: Optional[str
 @app.post("/payment/voucher/generate")
 def generate_voucher(payload: VoucherGenerateRequest, x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = DEFAULT_USER_ID
-        if x_user_email:
-            resolved = get_user_id_by_email(x_user_email)
-            if resolved:
-                user_id = resolved
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+        user_id, _ = get_user_id_by_email(x_user_email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="User not found")
         booking_data = get_booking_by_id(user_id, payload.bookingId)
         if not booking_data:
             raise HTTPException(status_code=404, detail="Booking not found")
         voucher_number = f"1BILL{payload.bookingId:04d}{random.randint(10000, 99999):05d}"
         expiry_date = (datetime.utcnow() + timedelta(days=3)).isoformat() + "Z"
         create_payment(user_id, payload.bookingId, payload.amount, "Voucher", voucher_number)
-        return ok({
-            "voucherNumber": voucher_number,
-            "expiryDate": expiry_date,
-            "amount": payload.amount,
-        }, "Voucher generated.")
+        return ok({"voucherNumber": voucher_number, "expiryDate": expiry_date, "amount": payload.amount}, "Voucher generated.")
     except HTTPException:
         raise
     except Exception as e:
@@ -1369,11 +1460,11 @@ def generate_voucher(payload: VoucherGenerateRequest, x_user_email: Optional[str
 @app.post("/payment/payfast/initiate")
 def payfast_initiate(payload: PayFastInitiateRequest, x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = DEFAULT_USER_ID
-        if x_user_email:
-            resolved = get_user_id_by_email(x_user_email)
-            if resolved:
-                user_id = resolved
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+        user_id, _ = get_user_id_by_email(x_user_email)
+        if not user_id:
+            raise HTTPException(status_code=404, detail="User not found")
         booking_data = get_booking_by_id(user_id, payload.bookingId)
         if not booking_data:
             raise HTTPException(status_code=404, detail="Booking not found")
@@ -1404,3 +1495,128 @@ async def payfast_notify(request: Request):
     if order_id:
         update_payment_status(order_id, "Paid" if payment_status == "COMPLETE" else "Failed")
     return ok()
+
+
+# ── Recent endpoints (admin dashboard) ───────────────────────────────────────
+
+@app.get("/api/booking/recent")
+@app.get("/booking/recent")
+def get_recent_bookings(limit: int = Query(5)):
+    try:
+        bookings = get_all_bookings()
+        return ok(bookings[:limit])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/contact/recent")
+@app.get("/contact/recent")
+def get_recent_contacts(limit: int = Query(5)):
+    try:
+        contacts = get_all_contacts()
+        return ok(contacts[:limit])
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── /all aliases (unpaginated, for admin dropdowns & counts) ──────────────────
+
+@app.get("/api/location/all")
+@app.get("/location/all")
+def list_all_locations():
+    try:
+        return ok(get_all_locations())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pricingplan/all")
+@app.get("/pricingplan/all")
+def list_all_pricing_plans():
+    try:
+        return ok(get_pricing_plans())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/gallery/all")
+@app.get("/gallery/all")
+def list_all_gallery():
+    try:
+        return ok(get_gallery_images())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/spacetype/all")
+@app.get("/spacetype/all")
+def list_all_space_types():
+    try:
+        return ok(get_all_space_types())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Plan Features ─────────────────────────────────────────────────────────────
+
+class PlanFeatureRequest(BaseModel):
+    planId: int
+    featureName: str
+
+@app.get("/api/planfeature/by-plan/{plan_id}")
+@app.get("/planfeature/by-plan/{plan_id}")
+def get_plan_features(plan_id: int):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(
+            "SELECT Id AS id, PlanId AS planId, FeatureName AS featureName FROM dbo.WN_PlanFeatures WITH (NOLOCK) WHERE PlanId = %d AND Status != 0",
+            (plan_id,)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return ok(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/planfeature", status_code=201)
+@app.post("/planfeature", status_code=201)
+def create_plan_feature(payload: PlanFeatureRequest):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO dbo.WN_PlanFeatures (PlanId, FeatureName, Status) VALUES (%d, %s, 1); SELECT SCOPE_IDENTITY() AS id",
+            (payload.planId, payload.featureName)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        return ok({"id": row[0] if row else None}, "Feature created.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/api/planfeature/{id}")
+@app.put("/planfeature/{id}")
+def update_plan_feature(id: int, payload: PlanFeatureRequest):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE dbo.WN_PlanFeatures SET FeatureName=%s WHERE Id=%d",
+            (payload.featureName, id)
+        )
+        conn.commit()
+        conn.close()
+        return ok(message="Feature updated.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/planfeature/{id}")
+@app.delete("/planfeature/{id}")
+def delete_plan_feature(id: int):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE dbo.WN_PlanFeatures SET Status=0 WHERE Id=%d", (id,))
+        conn.commit()
+        conn.close()
+        return ok(message="Feature deleted.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

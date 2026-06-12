@@ -75,6 +75,8 @@ def sync_user(email: str, first_name: str, last_name: str, phone: str = None) ->
             row = cursor.fetchone()
             new_id   = row[0] if row else None
             new_guid = str(row[1]) if (row and len(row) > 1 and row[1]) else None
+            if new_id:
+                cursor.execute("UPDATE dbo.WN_Users SET RoleId = 14 WHERE Id = %d", (new_id,))
             conn.commit()
             return (new_id, new_guid)
     except Exception as e:

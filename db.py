@@ -140,8 +140,7 @@ def get_all_spaces():
             price_val = row.get("PricePerDay") or row.get("pricePerDay")
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
             result.append({
-                "id":             guid,
-                "numericId":      row.get("Id") or row.get("id") or 0,
+                "id":             row.get("Id") or row.get("id"),
                 "idGuid":         guid,
                 "name":           row.get("Name") or row.get("name"),
                 "code":           row.get("Code") or row.get("code"),
@@ -172,7 +171,7 @@ def get_gallery_images():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("Id") or row.get("id")
             row["idGuid"] = guid
         return rows
     except Exception as e:
@@ -196,7 +195,7 @@ def get_pricing_plans():
                 price_val = row.get("Price") or row.get("price")
                 guid = str(row.get("IdGUID") or row.get("idGuid") or "")
                 plans_dict[plan_id] = {
-                    "id":          guid,
+                    "id":          plan_id,
                     "idGuid":      guid,
                     "name":        row.get("Name") or row.get("name"),
                     "price":       float(price_val) if price_val is not None else 0.0,
@@ -318,7 +317,7 @@ def get_all_locations():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("Id") or row.get("id")
             row["idGuid"] = guid
             if "Name" in row and "name" not in row:
                 row["name"] = row["Name"]
@@ -411,7 +410,7 @@ def get_all_users():
         for row in rows:
             guid = str(row["idGuid"]) if row.get("idGuid") else ""
             result.append({
-                "id":        guid,
+                "id":        row.get("numericId"),
                 "idGuid":    guid,
                 "email":     row.get("email") or "",
                 "name":      row.get("name") or "",
@@ -435,7 +434,7 @@ def get_all_bookings():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("Id") or row.get("id")
             row["idGuid"] = guid
             amount = row.get("totalAmount") or row.get("TotalAmount") or row.get("Total_Amount") or 0
             row["totalAmount"]   = float(amount) if amount is not None else 0.0
@@ -460,7 +459,7 @@ def get_all_payments():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("Id") or row.get("id")
             row["idGuid"] = guid
             if row.get("amount") is not None:
                 row["amount"] = float(row["amount"])
@@ -476,15 +475,19 @@ def get_all_space_types():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_ALL_SPACE_TYPES)
+        cursor.execute("""
+            SELECT st.Id, st.IdGUID, st.Description, st.Capacity, st.HourlyAllowed, st.Status
+            FROM dbo.WN_SpaceTypes st WITH (NOLOCK)
+            WHERE st.Status != 0
+        """)
         rows = cursor.fetchall()
         return [{
-            "id":           str(row.get("IdGUID") or row.get("idGuid") or ""),
-            "idGuid":       str(row.get("IdGUID") or row.get("idGuid") or ""),
-            "name":         row.get("Description") or row.get("description") or row.get("Name") or row.get("name"),
-            "capacity":     row.get("Capacity") or row.get("capacity"),
-            "hourlyAllowed":row.get("HourlyAllowed") or row.get("hourlyAllowed"),
-            "isActive":     (row.get("Status") or row.get("status")) == 1,
+            "id":            row.get("Id"),
+            "idGuid":        str(row.get("IdGUID") or ""),
+            "name":          row.get("Description") or row.get("Name") or "",
+            "capacity":      row.get("Capacity"),
+            "hourlyAllowed": bool(row.get("HourlyAllowed")),
+            "isActive":      row.get("Status") == 1,
         } for row in rows]
     except Exception as e:
         raise e
@@ -500,7 +503,7 @@ def get_all_contacts():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("Id") or row.get("id")
             row["idGuid"] = guid
             row["createdAt"] = _iso(row.get("createdAt"))
         return rows
@@ -526,7 +529,7 @@ def get_all_memberships():
         rows = cursor.fetchall()
         for row in rows:
             guid = str(row.get("idGuid") or "")
-            row["id"] = guid
+            row["id"] = row.get("numericId") or row.get("id")
             row["idGuid"] = guid
             row["startDate"] = _iso(row.get("startDate"))
             row["endDate"]   = _iso(row.get("endDate"))

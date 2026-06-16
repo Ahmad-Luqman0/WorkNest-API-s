@@ -169,20 +169,25 @@ def get_gallery_images():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_GALLERY_IMAGES)
+        cursor.execute("""
+            SELECT Id, IdGUID, Title, ImageUrl, SortOrder, IsActive, CreatedOn AS createdAt
+            FROM dbo.WN_GalleryImages
+            WHERE Status = 1
+            ORDER BY ISNULL(SortOrder, 9999), Id
+        """)
         rows = cursor.fetchall()
         result = []
         for row in rows:
-            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            guid = str(row.get("IdGUID") or "")
             result.append({
                 "id":        guid,
-                "numericId": row.get("Id") or row.get("id"),
+                "numericId": row.get("Id"),
                 "idGuid":    guid,
-                "title":     row.get("Title") or row.get("title") or "",
-                "imageUrl":  row.get("ImageUrl") or row.get("imageUrl") or row.get("Image_Url") or "",
-                "sortOrder": row.get("SortOrder") or row.get("sortOrder") or 0,
-                "isActive":  bool(row.get("IsActive") if row.get("IsActive") is not None else row.get("isActive") if row.get("isActive") is not None else True),
-                "createdAt": _iso(row.get("CreatedAt") or row.get("createdAt")),
+                "title":     row.get("Title") or "",
+                "imageUrl":  row.get("ImageUrl") or "",
+                "sortOrder": row.get("SortOrder") or 0,
+                "isActive":  bool(row.get("IsActive")) if row.get("IsActive") is not None else True,
+                "createdAt": _iso(row.get("createdAt")),
             })
         return result
     except Exception as e:

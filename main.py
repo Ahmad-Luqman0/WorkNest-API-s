@@ -1334,9 +1334,9 @@ def list_contacts(page: int = Query(1), limit: int = Query(10), search: str = Qu
 @app.post("/api/book-tour", status_code=201)
 def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Header(None)):
     try:
-        user_id = None
-        if x_user_email:
-            user_id, _ = get_user_id_by_email(x_user_email)
+        # Resolve user_id from header first, fall back to payload email
+        email_to_resolve = x_user_email or payload.email
+        user_id, _ = get_user_id_by_email(email_to_resolve)
         new_id = book_tour(payload.fullName, payload.email, payload.message, payload.phone, user_id)
         return ok({"id": new_id, "fullName": payload.fullName, "email": payload.email}, "Contact recorded.")
     except Exception as e:
@@ -1403,8 +1403,9 @@ def update_gallery_image(id: str, payload: GalleryUpsertRequest):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE dbo.WN_GalleryImages SET Title=%s, ImageUrl=%s, SortOrder=%d, IsActive=%d WHERE IdGUID=%s
-        """, (payload.title, payload.imageUrl, payload.sortOrder or 0, 1 if payload.isActive else 0, id))
+            UPDATE dbo.WN_GalleryImages SET Title=%s, ImageUrl=%s, SortOrder=%d, IsActive=%d
+            WHERE IdGUID=%s OR CAST(Id AS NVARCHAR)=%s
+        """, (payload.title, payload.imageUrl, payload.sortOrder or 0, 1 if payload.isActive else 0, id, id))
         conn.commit()
         conn.close()
         return ok(message="Gallery image updated.")
@@ -1417,7 +1418,10 @@ def delete_gallery_image(id: str):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        cursor.execute("UPDATE dbo.WN_GalleryImages SET IsActive = 0 WHERE IdGUID = %s", (id,))
+        cursor.execute(
+            "UPDATE dbo.WN_GalleryImages SET IsActive = 0 WHERE IdGUID=%s OR CAST(Id AS NVARCHAR)=%s",
+            (id, id)
+        )
         conn.commit()
         conn.close()
         return ok(message="Gallery image deleted.")

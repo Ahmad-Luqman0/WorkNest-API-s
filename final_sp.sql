@@ -472,6 +472,7 @@ BEGIN
            b.PhoneNumber AS phone,
            b.Message    AS message,
            b.CreatedOn  AS createdAt,
+           b.CreatedBy  AS createdBy,
            b.Status     AS status
     FROM dbo.WN_BookTour b WITH (NOLOCK)
     WHERE b.Status = 1

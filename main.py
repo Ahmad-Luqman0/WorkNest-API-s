@@ -41,7 +41,15 @@ try:
         delete_space,
         update_payment_status,
         get_connection,
-        _iso
+        _iso,
+        # Auto-assignment functions
+        get_available_spaces,
+        create_booking_with_auto_assignment,
+        get_availability_counts,
+        get_available_spaces_by_type,
+        reassign_booking,
+        get_available_spaces_for_reassignment,
+        get_booking_calendar
     )
 except ImportError:
     from db import (
@@ -69,7 +77,15 @@ except ImportError:
         delete_space,
         update_payment_status,
         get_connection,
-        _iso
+        _iso,
+        # Auto-assignment functions
+        get_available_spaces,
+        create_booking_with_auto_assignment,
+        get_availability_counts,
+        get_available_spaces_by_type,
+        reassign_booking,
+        get_available_spaces_for_reassignment,
+        get_booking_calendar
     )
 
 app = FastAPI(title="WorkNest API", version="1.0.0")
@@ -386,7 +402,7 @@ def get_user(id: str):
         # Accept GUID (standard) or email fallback
         import re
         guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-        if guid_pattern.match(id):
+        if "-" in id and len(id) == 36:
             cursor.execute(
                 "SELECT IdGUID, Email, Name, PhoneNumber, CreatedOn, RoleId FROM dbo.WN_Users WITH (NOLOCK) WHERE IdGUID = %s",
                 (id,)
@@ -427,66 +443,55 @@ def get_user_history(id: str):
         cursor = conn.cursor(as_dict=True)
         import re
         guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-        if guid_pattern.match(id):
-            user_guid = id
-        elif "@" in id:
-            cursor.execute("SELECT IdGUID FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s", (id,))
-            r = cursor.fetchone()
-            user_guid = str(r["IdGUID"]) if r else None
-        else:
-            cursor.execute("SELECT IdGUID FROM dbo.WN_Users WITH (NOLOCK) WHERE Id = %d", (int(id),))
-            r = cursor.fetchone()
-            user_guid = str(r["IdGUID"]) if r else None
-        if not user_guid:
-            raise HTTPException(status_code=404, detail="User not found")
 
-        cursor.execute("""
-            SELECT b.IdGUID AS id,
-                   s.Name AS spaceName,
-                   b.StartDateTime AS startDateTime, b.EndDateTime AS endDateTime,
-                   b.TotalAmount AS totalAmount,
-                   CASE b.BookingStatus
-                     WHEN 1 THEN 'Confirmed'
-                     WHEN 2 THEN 'Cancelled'
-                     WHEN 3 THEN 'Rejected'
-                     WHEN 4 THEN 'Completed'
-                     ELSE 'Pending'
-                   END AS bookingStatus
-            FROM dbo.WN_Bookings b
-            LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-            WHERE b.UserGuid = %s
-            ORDER BY b.StartDateTime DESC
-        """, (user_guid,))
+        # Resolve numeric Id from whatever identifier is passed
+        if "-" in id and len(id) == 36:
+            cursor.execute("SELECT Id FROM dbo.WN_Users WITH (NOLOCK) WHERE IdGUID = %s", (id,))
+        elif "@" in id:
+            cursor.execute("SELECT Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Email = %s", (id,))
+        else:
+            cursor.execute("SELECT Id FROM dbo.WN_Users WITH (NOLOCK) WHERE Id = %d", (int(id),))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="User not found")
+        numeric_id = row["Id"]
+
+        # Use the SP to get all bookings for this user
+        cursor.execute("EXEC dbo.WN_Bookings_GetListByUserId %d", (numeric_id,))
         bookings = cursor.fetchall()
         for b in bookings:
-            b["id"] = str(b["id"]) if b.get("id") else None
+            b["id"]            = str(b["idGuid"]) if b.get("idGuid") else b.get("id")
             b["startDateTime"] = _iso(b.get("startDateTime"))
-            b["endDateTime"] = _iso(b.get("endDateTime"))
-            b["totalAmount"] = float(b["totalAmount"]) if b.get("totalAmount") else 0.0
+            b["endDateTime"]   = _iso(b.get("endDateTime"))
+            b["totalAmount"]   = float(b["totalAmount"]) if b.get("totalAmount") else 0.0
+            b["spaceName"]     = b.get("spaceName") or "N/A"
 
+        # Get payments linked to this user's bookings
         cursor.execute("""
             SELECT p.IdGUID AS id, p.Amount AS amount, p.PaymentMethod AS paymentMethod,
-                   p.PaymentStatus AS paymentStatus, p.PaidAt AS paidAt
+                   p.PaymentStatus AS paymentStatus, p.PaidAt AS paidAt, p.CreatedOn AS createdAt
             FROM dbo.WN_Payments p
             INNER JOIN dbo.WN_Bookings b ON p.BookingId = b.Id
-            WHERE b.UserGuid = %s
-            ORDER BY p.PaidAt DESC
-        """, (user_guid,))
+            INNER JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+            WHERE u.Id = %d
+            ORDER BY p.CreatedOn DESC
+        """, (numeric_id,))
         payments = cursor.fetchall()
         for p in payments:
-            p["id"] = str(p["id"]) if p.get("id") else None
-            p["amount"] = float(p["amount"]) if p.get("amount") else 0.0
-            p["paidAt"] = _iso(p.get("paidAt"))
+            p["id"]       = str(p["id"]) if p.get("id") else None
+            p["amount"]   = float(p["amount"]) if p.get("amount") else 0.0
+            p["paidAt"]   = _iso(p.get("paidAt"))
+            p["createdAt"]= _iso(p.get("createdAt"))
 
-        total_paid = sum(p["amount"] for p in payments if p.get("paymentStatus") == "Paid")
         conn.close()
+        total_paid = sum(p["amount"] for p in payments if p.get("paymentStatus") == "Paid")
         return ok({
             "stats": {
-                "totalBookings": len(bookings),
-                "totalPayments": len(payments),
-                "totalPaidAmount": total_paid,
-                "failedPayments": sum(1 for p in payments if p.get("paymentStatus") == "Failed"),
-                "cancelledBookings": sum(1 for b in bookings if b.get("bookingStatus") == "Cancelled"),
+                "totalBookings":    len(bookings),
+                "totalPayments":    len(payments),
+                "totalPaidAmount":  total_paid,
+                "failedPayments":   sum(1 for p in payments if p.get("paymentStatus") == "Failed"),
+                "cancelledBookings":sum(1 for b in bookings if b.get("bookingStatus") == "Cancelled"),
             },
             "recentBookings": bookings,
             "recentPayments": payments,
@@ -706,6 +711,30 @@ def list_available_spaces():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/space/available-by-type")
+@app.get("/space/available-by-type")
+def get_available_spaces_by_type_endpoint(
+    spaceType: str = Query(...),
+    startDateTime: Optional[str] = Query(None),
+    endDateTime: Optional[str] = Query(None)
+):
+    """Get available spaces by type with optional time filtering."""
+    try:
+        result = get_available_spaces_by_type(spaceType, startDateTime, endDateTime)
+        return ok(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/space/availability-counts")
+@app.get("/space/availability-counts")
+def get_availability_counts_endpoint():
+    """Get real-time availability counts for all space types."""
+    try:
+        result = get_availability_counts()
+        return ok(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/space")
 @app.get("/space")
 def list_spaces(page: int = Query(1), limit: int = Query(10), search: str = Query("")):
@@ -834,6 +863,20 @@ def list_all_bookings(page: int = Query(1), limit: int = Query(10), search: str 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/booking/available-spaces")
+@app.get("/booking/available-spaces")
+def get_booking_available_spaces(
+    spaceType: str = Query(...),
+    startDateTime: str = Query(...),
+    endDateTime: str = Query(...)
+):
+    """Get available spaces for auto-assignment booking."""
+    try:
+        result = get_available_spaces(spaceType, startDateTime, endDateTime)
+        return ok(result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/booking/my")
 @app.get("/booking/my")
 def list_my_bookings(x_user_email: Optional[str] = Header(None)):
@@ -853,27 +896,16 @@ def list_my_bookings(x_user_email: Optional[str] = Header(None)):
 @app.get("/booking/calendar")
 def booking_calendar(spaceId: int = Query(...), year: int = Query(...), month: int = Query(...)):
     try:
-        conn = get_connection()
-        cursor = conn.cursor(as_dict=True)
-        cursor.execute("""
-            SELECT CONVERT(varchar, b.StartDateTime, 23) AS startDate,
-                   CONVERT(varchar, b.EndDateTime, 23) AS endDate
-            FROM dbo.WN_Bookings b
-            INNER JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
-            WHERE s.Id = %d AND b.BookingStatus != 2
-              AND YEAR(b.StartDateTime) = %d AND MONTH(b.StartDateTime) = %d
-        """, (spaceId, year, month))
-        rows = cursor.fetchall()
-        conn.close()
+        result = get_booking_calendar(spaceId, year, month)
         booked_dates = []
-        for r in rows:
-            start = datetime.strptime(r["startDate"], "%Y-%m-%d")
-            end = datetime.strptime(r["endDate"], "%Y-%m-%d")
+        for booking in result:
+            start = datetime.strptime(booking["startDate"], "%Y-%m-%d")
+            end = datetime.strptime(booking["endDate"], "%Y-%m-%d")
             d = start
             while d <= end:
                 booked_dates.append(d.strftime("%Y-%m-%d"))
                 d += timedelta(days=1)
-        return ok({"bookedDates": list(set(booked_dates))})
+        return ok({"bookedDates": list(set(booked_dates)), "bookings": result})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -910,31 +942,60 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
     try:
         if not x_user_email:
             raise HTTPException(status_code=401, detail="User email header required")
-        user_id, _ = get_user_id_by_email(x_user_email)
-        if not user_id:
-            raise HTTPException(status_code=404, detail="User not found")
-        amount = payload.totalAmount or 0.0
-        method = ref = None
-        if payload.payment:
-            amount = payload.payment.amount
-            method = payload.payment.method
-            ref = payload.payment.referenceNumber or payload.payment.bankDepositId or ""
-        # Resolve spaceId — accept both GUID string and numeric int
-        import re
-        guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
-        space_id = payload.spaceId
-        if isinstance(space_id, str) and guid_pattern.match(str(space_id)):
-            conn = get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT Id FROM dbo.WN_Spaces WITH (NOLOCK) WHERE IdGUID = %s", (str(space_id),))
-            row = cursor.fetchone()
-            conn.close()
-            if not row:
-                raise HTTPException(status_code=404, detail="Space not found")
-            space_id = row[0]
-        result = create_booking(user_id, space_id, payload.startDateTime,
-            payload.endDateTime, payload.notes or "", amount, method, ref)
-        return ok({"id": result.get("idGuid") or result.get("id"), "spaceId": payload.spaceId, "totalAmount": amount}, "Booking successful.")
+        
+        # Check if this is an auto-assignment booking (spaceId is string "auto" or space type)
+        if isinstance(payload.spaceId, str) and (payload.spaceId == "auto" or not payload.spaceId.replace("-", "").replace("a", "").replace("f", "").isalnum()):
+            # Auto-assignment booking
+            space_type = payload.spaceId if payload.spaceId != "auto" else "Private Office"  # Default
+            amount = payload.totalAmount or 0.0
+            method = ref = None
+            if payload.payment:
+                amount = payload.payment.amount
+                method = payload.payment.method
+                ref = payload.payment.referenceNumber or payload.payment.bankDepositId or ""
+            
+            result = create_booking_with_auto_assignment(
+                x_user_email, space_type, payload.startDateTime, payload.endDateTime,
+                payload.notes or "", amount, method, ref
+            )
+            return ok({
+                "id": result.get("idGuid") or result.get("id"),
+                "assignedSpaceId": result.get("assignedSpaceId"),
+                "assignedSpaceName": result.get("assignedSpaceName"),
+                "spaceType": result.get("spaceType"),
+                "totalAmount": amount,
+                "isAutoAssigned": True
+            }, "Booking successful with auto-assigned space.")
+        else:
+            # Original manual booking logic
+            user_id, _ = get_user_id_by_email(x_user_email)
+            if not user_id:
+                raise HTTPException(status_code=404, detail="User not found")
+            amount = payload.totalAmount or 0.0
+            method = ref = None
+            if payload.payment:
+                amount = payload.payment.amount
+                method = payload.payment.method
+                ref = payload.payment.referenceNumber or payload.payment.bankDepositId or ""
+            
+            # Resolve spaceId — accept both GUID string and numeric int
+            import re
+            guid_pattern = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+            space_id = payload.spaceId
+            if isinstance(space_id, str) and guid_pattern.match(str(space_id)):
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT Id FROM dbo.WN_Spaces WITH (NOLOCK) WHERE IdGUID = %s", (str(space_id),))
+                row = cursor.fetchone()
+                conn.close()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Space not found")
+                space_id = row[0]
+            
+            result = create_booking(user_id, space_id, payload.startDateTime,
+                payload.endDateTime, payload.notes or "", amount, method, ref)
+            return ok({"id": result.get("idGuid") or result.get("id"), "spaceId": payload.spaceId, "totalAmount": amount}, "Booking successful.")
+            
     except HTTPException:
         raise
     except Exception as e:
@@ -997,6 +1058,48 @@ def update_booking(id: str, payload: BookingRequest):
         conn.commit()
         conn.close()
         return ok(message="Booking updated.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/api/booking/{id}/reassign")
+@app.patch("/booking/{id}/reassign")
+def reassign_booking_endpoint(id: str, payload: ReassignBookingRequest, x_user_email: Optional[str] = Header(None)):
+    """Reassign booking to different space (admin only)."""
+    try:
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="Admin email header required")
+        
+        # Resolve numeric booking ID from GUID
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT Id FROM dbo.WN_Bookings WHERE IdGUID = %s", (id,))
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        numeric_booking_id = row[0]
+        result = reassign_booking(numeric_booking_id, payload.spaceId, x_user_email)
+        return ok(result, "Booking reassigned successfully.")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/booking/available-spaces-reassignment")
+@app.get("/booking/available-spaces-reassignment")
+def get_available_spaces_for_reassignment_endpoint(
+    spaceType: str = Query(...),
+    startDateTime: str = Query(...),
+    endDateTime: str = Query(...),
+    excludeBookingId: Optional[int] = Query(None)
+):
+    """Get available spaces for booking reassignment (admin only)."""
+    try:
+        result = get_available_spaces_for_reassignment(spaceType, startDateTime, endDateTime, excludeBookingId)
+        return ok(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -1571,6 +1674,9 @@ def list_all_space_types():
 
 
 # ── Plan Features ─────────────────────────────────────────────────────────────
+
+class ReassignBookingRequest(BaseModel):
+    spaceId: int
 
 class PlanFeatureRequest(BaseModel):
     planId: int

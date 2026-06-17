@@ -49,6 +49,15 @@ SP_GET_ALL_CONTACTS      = "EXEC dbo.WN_Contacts_GetList"
 SP_GET_ALL_MEMBERSHIPS   = "EXEC dbo.WN_Memberships_GetList"
 SP_UPDATE_PAYMENT_STATUS = "EXEC dbo.WN_Payments_UpdateStatusByRef %s, %s"
 
+# Auto-Assignment Booking System Stored Procedures
+SP_GET_AVAILABLE_SPACES = "EXEC dbo.WN_GetAvailableSpaces %s, %s, %s"
+SP_CREATE_BOOKING_AUTO_ASSIGN = "EXEC dbo.WN_CreateBookingWithAutoAssignment %s, %s, %s, %s, %s, %s, %s, %s"
+SP_GET_AVAILABILITY_COUNTS = "EXEC dbo.WN_GetAvailabilityCounts"
+SP_GET_AVAILABLE_BY_TYPE = "EXEC dbo.WN_GetAvailableSpacesByType %s, %s, %s"
+SP_REASSIGN_BOOKING = "EXEC dbo.WN_ReassignBooking %s, %s, %s"
+SP_GET_SPACES_FOR_REASSIGNMENT = "EXEC dbo.WN_GetAvailableSpacesForReassignment %s, %s, %s, %s"
+SP_GET_BOOKING_CALENDAR = "EXEC dbo.WN_GetBookingCalendar %s, %s, %s"
+
 
 def _iso(val):
     return val.isoformat() if val and hasattr(val, "isoformat") else val
@@ -613,6 +622,202 @@ def update_payment_status(transaction_ref: str, status: str):
         return True
     except Exception as e:
         conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+# ============================================================
+# Auto-Assignment Booking System Functions
+# ============================================================
+
+def get_available_spaces(space_type: str, start_datetime: str, end_datetime: str):
+    """Get available spaces for auto-assignment with naming convention priority."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_AVAILABLE_SPACES, (space_type, start_datetime, end_datetime))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row.get("Id"),
+                "idGuid": str(row.get("IdGUID") or ""),
+                "name": row.get("Name") or "",
+                "code": row.get("Code") or "",
+                "pricePerDay": float(row.get("PricePerDay") or 0),
+                "pricePerHour": float(row.get("PricePerHour") or 0),
+                "spaceType": row.get("SpaceType") or "",
+                "locationName": row.get("LocationName") or "",
+                "priority": row.get("Priority") or 1,
+                "isAutoAssigned": True
+            })
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def create_booking_with_auto_assignment(user_email: str, space_type: str, start_datetime: str, 
+                                        end_datetime: str, notes: str = "", total_amount: float = 0,
+                                        payment_method: str = None, payment_ref: str = None):
+    """Create booking with automatic space assignment using stored procedure."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Call stored procedure with output parameters
+        cursor.execute("""
+            DECLARE @bookingId INT, @bookingGuid UNIQUEIDENTIFIER, 
+                    @assignedSpaceId INT, @assignedSpaceName NVARCHAR(255);
+            
+            EXEC dbo.sp_CreateBookingWithAutoAssignment 
+                @userEmail = %s, @spaceType = %s, @startDateTime = %s, @endDateTime = %s,
+                @notes = %s, @totalAmount = %s, @paymentMethod = %s, @paymentRef = %s,
+                @bookingId = @bookingId OUTPUT, @bookingGuid = @bookingGuid OUTPUT,
+                @assignedSpaceId = @assignedSpaceId OUTPUT, @assignedSpaceName = @assignedSpaceName OUTPUT;
+            
+            SELECT @bookingId AS bookingId, @bookingGuid AS bookingGuid, 
+                   @assignedSpaceId AS assignedSpaceId, @assignedSpaceName AS assignedSpaceName;
+        """, (user_email, space_type, start_datetime, end_datetime, notes, total_amount, payment_method, payment_ref))
+        
+        result = cursor.fetchone()
+        conn.commit()
+        
+        if result:
+            return {
+                "id": result[0],  # bookingId
+                "idGuid": str(result[1]) if result[1] else None,  # bookingGuid
+                "assignedSpaceId": result[2],  # assignedSpaceId
+                "assignedSpaceName": result[3],  # assignedSpaceName
+                "spaceType": space_type,
+                "isAutoAssigned": True
+            }
+        else:
+            raise Exception("Failed to create booking with auto-assignment")
+            
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_availability_counts():
+    """Get real-time availability counts by space type."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_AVAILABILITY_COUNTS)
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "spaceType": row.get("spaceType") or "",
+                "totalSpaces": row.get("totalSpaces") or 0,
+                "availableSpaces": row.get("availableSpaces") or 0,
+                "bookedSpaces": row.get("bookedSpaces") or 0
+            })
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_available_spaces_by_type(space_type: str, start_datetime: str = None, end_datetime: str = None):
+    """Get availability count for specific space type with optional time filter."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_AVAILABLE_BY_TYPE, (space_type, start_datetime, end_datetime))
+        row = cursor.fetchone()
+        if row:
+            return {
+                "spaceType": space_type,
+                "totalSpaces": row.get("totalSpaces") or 0,
+                "availableSpaces": row.get("availableSpaces") or 0
+            }
+        return {"spaceType": space_type, "totalSpaces": 0, "availableSpaces": 0}
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def reassign_booking(booking_id: int, new_space_id: int, admin_user_email: str):
+    """Reassign booking to different space (admin only)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_REASSIGN_BOOKING, (booking_id, new_space_id, admin_user_email))
+        result = cursor.fetchone()
+        conn.commit()
+        
+        if result:
+            return {
+                "bookingId": str(result.get("bookingId") or ""),
+                "newSpaceName": result.get("newSpaceName") or "",
+                "newSpaceCode": result.get("newSpaceCode") or "",
+                "status": result.get("status") or "Success"
+            }
+        else:
+            raise Exception("Failed to reassign booking")
+            
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_available_spaces_for_reassignment(space_type: str, start_datetime: str, end_datetime: str, exclude_booking_id: int = None):
+    """Get available spaces for admin reassignment."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_SPACES_FOR_REASSIGNMENT, (space_type, start_datetime, end_datetime, exclude_booking_id))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "id": row.get("Id"),
+                "idGuid": str(row.get("IdGUID") or ""),
+                "name": row.get("Name") or "",
+                "code": row.get("Code") or "",
+                "description": row.get("Description") or "",
+                "locationName": row.get("LocationName") or ""
+            })
+        return result
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_booking_calendar(space_id: int, year: int, month: int):
+    """Get booking calendar data for specific space."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_BOOKING_CALENDAR, (space_id, year, month))
+        rows = cursor.fetchall()
+        result = []
+        for row in rows:
+            result.append({
+                "bookingId": str(row.get("bookingId") or ""),
+                "startDateTime": _iso(row.get("StartDateTime")),
+                "endDateTime": _iso(row.get("EndDateTime")),
+                "startDate": row.get("startDate") or "",
+                "endDate": row.get("endDate") or "",
+                "userEmail": row.get("userEmail") or "",
+                "userName": row.get("userName") or "",
+                "status": row.get("status") or "",
+                "totalAmount": float(row.get("TotalAmount") or 0)
+            })
+        return result
+    except Exception as e:
         raise e
     finally:
         conn.close()

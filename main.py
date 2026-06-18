@@ -158,7 +158,7 @@ class GoogleLoginRequest(BaseModel):
 class ContactRequest(BaseModel):
     fullName: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    message: str = Field(..., min_length=1, max_length=500)
+    message: str = Field(..., min_length=1, max_length=100)
     phone: str = Field(..., min_length=1, max_length=20)
 
 class GuestDetails(BaseModel):
@@ -174,8 +174,7 @@ class PaymentDetails(BaseModel):
     referenceNumber: Optional[str] = None
 
 class BookingRequest(BaseModel):
-    spaceId: Optional[Union[int, str]] = None
-    spaceType: Optional[str] = None
+    spaceId: Union[int, str]
     startDateTime: str
     endDateTime: str
     notes: Optional[str] = None
@@ -228,6 +227,10 @@ class VoucherGenerateRequest(BaseModel):
     bookingId: int
     amount: float
 
+class ReassignBookingRequest(BaseModel):
+    spaceId: int
+
+
 class LocationUpsertRequest(BaseModel):
     name: str
     address: Optional[str] = None
@@ -266,14 +269,14 @@ class PaymentCreateRequest(BaseModel):
     amount: float
     paymentMethod: str
 
+class ReassignBookingRequest(BaseModel):
+    spaceId: int
+
 class UserCreateRequest(BaseModel):
     email: EmailStr
     firstName: Optional[str] = None
     lastName: Optional[str] = None
     password: Optional[str] = None
-
-class ReassignBookingRequest(BaseModel):
-    spaceId: int
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -965,10 +968,10 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
         if not x_user_email:
             raise HTTPException(status_code=401, detail="User email header required")
         
-        # Check if this is an auto-assignment booking (no spaceId, or spaceId is "auto")
-        if payload.spaceId is None or (isinstance(payload.spaceId, str) and (payload.spaceId == "auto" or not payload.spaceId.replace("-", "").replace("a", "").replace("f", "").isalnum())):
+        # Check if this is an auto-assignment booking (spaceId is string "auto" or space type)
+        if isinstance(payload.spaceId, str) and (payload.spaceId == "auto" or not payload.spaceId.replace("-", "").replace("a", "").replace("f", "").isalnum()):
             # Auto-assignment booking
-            space_type = payload.spaceType or (payload.spaceId if isinstance(payload.spaceId, str) and payload.spaceId != "auto" else None) or "Private Office"
+            space_type = payload.spaceId if payload.spaceId != "auto" else "Private Office"  # Default
             amount = payload.totalAmount or 0.0
             method = ref = None
             if payload.payment:
@@ -980,30 +983,17 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
                 x_user_email, space_type, payload.startDateTime, payload.endDateTime,
                 payload.notes or "", amount, method, ref
             )
-            # Fetch space code for display
-            assigned_space_info = None
-            if result.get('assignedSpaceId'):
-                try:
-                    conn = get_connection()
-                    cur = conn.cursor(as_dict=True)
-                    cur.execute("SELECT Name, Code FROM dbo.WN_Spaces WITH (NOLOCK) WHERE Id = %d", (result['assignedSpaceId'],))
-                    sr = cur.fetchone()
-                    conn.close()
-                    if sr:
-                        assigned_space_info = {'name': sr.get('Name') or '', 'code': sr.get('Code') or ''}
-                except Exception:
-                    pass
             return ok({
                 "id": result.get("idGuid") or result.get("id"),
                 "assignedSpaceId": result.get("assignedSpaceId"),
                 "assignedSpaceName": result.get("assignedSpaceName"),
-                "assignedSpace": assigned_space_info,
                 "spaceType": result.get("spaceType"),
                 "totalAmount": amount,
                 "isAutoAssigned": True
             }, "Booking successful with auto-assigned space.")
         else:
             # Original manual booking logic
+            
             user_id, _ = get_user_id_by_email(x_user_email)
             if not user_id:
                 raise HTTPException(status_code=404, detail="User not found")
@@ -1088,19 +1078,9 @@ def update_booking(id: str, payload: BookingRequest):
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        # If spaceId (GUID) provided, update SpaceGuid too
-        if payload.spaceId and str(payload.spaceId).strip():
-            cursor.execute("""
-                UPDATE dbo.WN_Bookings
-                SET StartDateTime=%s, EndDateTime=%s, SpaceGuid=%s, UpdatedOn=GETDATE()
-                WHERE IdGUID=%s
-            """, (payload.startDateTime, payload.endDateTime, str(payload.spaceId), id))
-        else:
-            cursor.execute("""
-                UPDATE dbo.WN_Bookings
-                SET StartDateTime=%s, EndDateTime=%s, UpdatedOn=GETDATE()
-                WHERE IdGUID=%s
-            """, (payload.startDateTime, payload.endDateTime, id))
+        cursor.execute("""
+            UPDATE dbo.WN_Bookings SET StartDateTime=%s, EndDateTime=%s WHERE IdGUID=%s
+        """, (payload.startDateTime, payload.endDateTime, id))
         conn.commit()
         conn.close()
         return ok(message="Booking updated.")
@@ -1813,3 +1793,4 @@ def delete_plan_feature(id: int):
         return ok(message="Feature deleted.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

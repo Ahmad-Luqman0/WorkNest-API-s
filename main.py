@@ -174,7 +174,8 @@ class PaymentDetails(BaseModel):
     referenceNumber: Optional[str] = None
 
 class BookingRequest(BaseModel):
-    spaceId: Union[int, str]
+    spaceId: Optional[Union[int, str]] = None
+    spaceType: Optional[str] = None
     startDateTime: str
     endDateTime: str
     notes: Optional[str] = None
@@ -188,7 +189,7 @@ class SpaceInsertRequest(BaseModel):
     spaceTypeId: int
     code: Optional[str] = None
     description: Optional[str] = None
-    floor: Optional[str] = None
+    floorId: Optional[int] = None
     pricePerDay: Optional[float] = None
     pricePerHour: Optional[float] = None
     imageUrl: Optional[str] = None
@@ -200,7 +201,7 @@ class SpaceUpdateRequest(BaseModel):
     spaceTypeId: Optional[int] = None
     code: Optional[str] = None
     description: Optional[str] = None
-    floor: Optional[str] = None
+    floorId: Optional[int] = None
     pricePerDay: Optional[float] = None
     pricePerHour: Optional[float] = None
     imageUrl: Optional[str] = None
@@ -271,6 +272,13 @@ class PaymentCreateRequest(BaseModel):
 
 class ReassignBookingRequest(BaseModel):
     spaceId: int
+
+class FloorUpsertRequest(BaseModel):
+    locationId: int
+    floorName: str
+
+class AmenityUpsertRequest(BaseModel):
+    name: str
 
 class UserCreateRequest(BaseModel):
     email: EmailStr
@@ -773,7 +781,7 @@ def list_spaces(page: int = Query(1), limit: int = Query(10), search: str = Quer
 def create_space(payload: SpaceInsertRequest):
     try:
         new_id = insert_space(payload.name, payload.locationId, payload.spaceTypeId,
-            payload.code, payload.description, payload.floor,
+            payload.code, payload.description, payload.floorId,
             payload.pricePerDay, payload.pricePerHour, payload.imageUrl, payload.amenities)
         return ok({"id": new_id}, "Space created.")
     except Exception as e:
@@ -793,7 +801,7 @@ def edit_space(id: str, payload: SpaceUpdateRequest):
         if not numeric_id:
             raise HTTPException(status_code=404, detail="Space not found")
         update_space(numeric_id, payload.name, payload.locationId, payload.spaceTypeId,
-            payload.code, payload.description, payload.floor,
+            payload.code, payload.description, payload.floorId,
             payload.pricePerDay, payload.pricePerHour, payload.imageUrl, payload.amenities)
         return ok(message="Space updated.")
     except HTTPException:
@@ -968,10 +976,9 @@ def make_booking(payload: BookingRequest, x_user_email: Optional[str] = Header(N
         if not x_user_email:
             raise HTTPException(status_code=401, detail="User email header required")
         
-        # Check if this is an auto-assignment booking (spaceId is string "auto" or space type)
-        if isinstance(payload.spaceId, str) and (payload.spaceId == "auto" or not payload.spaceId.replace("-", "").replace("a", "").replace("f", "").isalnum()):
-            # Auto-assignment booking
-            space_type = payload.spaceId if payload.spaceId != "auto" else "Private Office"  # Default
+        # Auto-assignment: spaceId is absent/auto OR spaceType is provided without spaceId
+        if not payload.spaceId or payload.spaceId == "auto" or (payload.spaceType and not payload.spaceId):
+            space_type = payload.spaceType or (payload.spaceId if isinstance(payload.spaceId, str) else "Private Office")
             amount = payload.totalAmount or 0.0
             method = ref = None
             if payload.payment:
@@ -1695,6 +1702,69 @@ def list_all_gallery():
 def list_all_space_types():
     try:
         return ok(get_all_space_types())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Floors ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/floor")
+@app.get("/floor")
+def list_floors(locationId: Optional[int] = Query(None)):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(as_dict=True)
+        if locationId:
+            cursor.execute("SELECT Id AS id, LocationId AS locationId, FloorName AS floorName FROM dbo.WN_Floors WITH (NOLOCK) WHERE LocationId = %d AND Status = 1", (locationId,))
+        else:
+            cursor.execute("SELECT Id AS id, LocationId AS locationId, FloorName AS floorName FROM dbo.WN_Floors WITH (NOLOCK) WHERE Status = 1")
+        rows = cursor.fetchall()
+        conn.close()
+        return ok(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/floor", status_code=201)
+@app.post("/floor", status_code=201)
+def create_floor(payload: FloorUpsertRequest):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO dbo.WN_Floors (LocationId, FloorName, Status) VALUES (%d, %s, 1); SELECT SCOPE_IDENTITY() AS id", (payload.locationId, payload.floorName))
+        row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        return ok({"id": row[0] if row else None}, "Floor created.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Amenities ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/amenity")
+@app.get("/amenity")
+def list_amenities():
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute("SELECT Id AS id, Name AS name FROM dbo.WN_Amenities WITH (NOLOCK) WHERE Status = 1")
+        rows = cursor.fetchall()
+        conn.close()
+        return ok(rows)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/amenity", status_code=201)
+@app.post("/amenity", status_code=201)
+def create_amenity(payload: AmenityUpsertRequest):
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO dbo.WN_Amenities (Name, Status) VALUES (%s, 1); SELECT SCOPE_IDENTITY() AS id", (payload.name,))
+        row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        return ok({"id": row[0] if row else None}, "Amenity created.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -142,21 +142,30 @@ def get_all_spaces():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
+        cursor.execute("SELECT Id, Name FROM dbo.WN_Amenities WITH (NOLOCK) WHERE Status = 1")
+        amenity_map = {str(row['Id']): row['Name'] for row in cursor.fetchall()}
+
         cursor.execute(SP_GET_ALL_SPACES)
         rows = cursor.fetchall()
+
         result = []
         for row in rows:
-            # SP returns camelCase aliases: idGuid, id, name, pricePerDay, etc.
             guid = str(row.get("idGuid") or row.get("IdGUID") or "")
             price_val = row.get("pricePerDay") or row.get("PricePerDay")
             status_val = row.get("status") or row.get("Status")
+            numeric_id = row.get("id") or row.get("Id")
+            raw_amenities = row.get("amenities") or row.get("Amenities") or ""
+            amenity_ids = [a.strip() for a in raw_amenities.split(",") if a.strip()]
+            amenity_names = ",".join(amenity_map.get(aid, aid) for aid in amenity_ids)
             result.append({
-                "id":             row.get("id") or row.get("Id"),
+                "id":             numeric_id,
                 "idGuid":         guid,
                 "name":           row.get("name") or row.get("Name") or "",
                 "code":           row.get("code") or row.get("Code") or "",
-                "floor":          row.get("floor") or row.get("Floor") or "",
+                "floorId":        row.get("floorId") or row.get("FloorId"),
+                "floorName":      row.get("floorName") or row.get("FloorName") or "",
                 "description":    row.get("description") or row.get("Description") or "",
+                "locationId":     row.get("locationId") or row.get("LocationId"),
                 "locationIdGuid": str(row.get("locationIdGuid") or row.get("LocationIdGuid") or ""),
                 "spaceTypeIdGuid":str(row.get("spaceTypeIdGuid") or row.get("SpaceTypeIdGuid") or ""),
                 "locationName":   row.get("locationName") or row.get("LocationName") or "",
@@ -164,7 +173,8 @@ def get_all_spaces():
                 "capacity":       row.get("capacity") or row.get("Capacity"),
                 "pricePerDay":    float(price_val) if price_val is not None else 0.0,
                 "pricePerHour":   float(row.get("pricePerHour") or row.get("PricePerHour") or 0),
-                "amenities":      row.get("amenities") or row.get("Amenities") or "",
+                "amenities":      amenity_names,
+                "amenityIds":     ",".join(amenity_ids),
                 "imageUrl":       row.get("imageUrl") or row.get("ImageUrl") or "",
                 "status":         status_val,
                 "spaceStatus":    "Available" if status_val == 1 else "Inactive",
@@ -682,13 +692,25 @@ def get_all_memberships():
         conn.close()
 
 
-def insert_space(name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities):
+def insert_space(name, location_id, space_type_id, code, description, floor_id, price_per_day, price_per_hour, image_url, amenities):
     conn = get_connection()
     try:
         cursor = conn.cursor()
+        loc_guid = st_guid = None
+        if location_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id=%d", (int(location_id),))
+            row = cursor.fetchone()
+            loc_guid = row[0] if row else None
+        if space_type_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_SpaceTypes WITH (NOLOCK) WHERE Id=%d", (int(space_type_id),))
+            row = cursor.fetchone()
+            st_guid = row[0] if row else None
         cursor.execute("""
-            EXEC dbo.WN_Spaces_Insert %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        """, (name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities))
+            INSERT INTO dbo.WN_Spaces
+                (Name, LocationId, SpaceTypeId, Code, Description, FloorId, PricePerDay, PricePerHour, ImageUrl, Amenities, Status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1);
+            SELECT SCOPE_IDENTITY() AS id
+        """, (name, loc_guid, st_guid, code, description, floor_id, price_per_day, price_per_hour, image_url, amenities))
         row = cursor.fetchone()
         new_id = row[0] if row else None
         conn.commit()
@@ -700,12 +722,36 @@ def insert_space(name, location_id, space_type_id, code, description, floor, pri
         conn.close()
 
 
-def update_space(space_id, name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities):
+def update_space(space_id, name, location_id, space_type_id, code, description, floor_id, price_per_day, price_per_hour, image_url, amenities):
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("EXEC dbo.WN_Spaces_Update %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s",
-            (space_id, name, location_id, space_type_id, code, description, floor, price_per_day, price_per_hour, image_url, amenities))
+        loc_guid = st_guid = None
+        if location_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_Locations WITH (NOLOCK) WHERE Id=%d", (int(location_id),))
+            row = cursor.fetchone()
+            loc_guid = row[0] if row else None
+        if space_type_id:
+            cursor.execute("SELECT IdGUID FROM dbo.WN_SpaceTypes WITH (NOLOCK) WHERE Id=%d", (int(space_type_id),))
+            row = cursor.fetchone()
+            st_guid = row[0] if row else None
+        # Only update GUID fields if resolved, otherwise keep existing
+        if loc_guid and st_guid:
+            cursor.execute("""
+                UPDATE dbo.WN_Spaces SET
+                    Name=%s, LocationId=%s, SpaceTypeId=%s, Code=%s, Description=%s,
+                    FloorId=%s, PricePerDay=%s, PricePerHour=%s, ImageUrl=%s, Amenities=%s
+                WHERE Id=%d
+            """, (name, loc_guid, st_guid, code, description,
+                   floor_id, price_per_day, price_per_hour, image_url, amenities, space_id))
+        else:
+            cursor.execute("""
+                UPDATE dbo.WN_Spaces SET
+                    Name=%s, Code=%s, Description=%s,
+                    FloorId=%s, PricePerDay=%s, PricePerHour=%s, ImageUrl=%s, Amenities=%s
+                WHERE Id=%d
+            """, (name, code, description,
+                   floor_id, price_per_day, price_per_hour, image_url, amenities, space_id))
         conn.commit()
         return True
     except Exception as e:

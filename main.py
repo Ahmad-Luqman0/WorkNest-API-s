@@ -158,7 +158,7 @@ class GoogleLoginRequest(BaseModel):
 class ContactRequest(BaseModel):
     fullName: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    message: str = Field(..., min_length=1, max_length=100)
+    message: str = Field(..., min_length=1, max_length=500)
     phone: str = Field(..., min_length=1, max_length=20)
 
 class GuestDetails(BaseModel):

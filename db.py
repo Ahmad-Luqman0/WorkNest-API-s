@@ -126,7 +126,7 @@ def book_tour(name: str, email: str, message: str, phone_number: str, user_id: i
     conn = get_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute(SP_BOOK_TOUR, (name, email, message, phone_number, user_id))
+        cursor.execute(SP_BOOK_TOUR, (name, email, phone_number, message, user_id if user_id else None))
         row = cursor.fetchone()
         new_id = row[0] if row else None
         conn.commit()

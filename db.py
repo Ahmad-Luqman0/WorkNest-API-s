@@ -48,6 +48,11 @@ SP_GET_ALL_SPACE_TYPES   = "EXEC dbo.WN_SpaceTypes_GetList"
 SP_GET_ALL_CONTACTS      = "EXEC dbo.WN_Contacts_GetList"
 SP_GET_ALL_MEMBERSHIPS   = "EXEC dbo.WN_Memberships_GetList"
 SP_UPDATE_PAYMENT_STATUS = "EXEC dbo.WN_Payments_UpdateStatusByRef %s, %s"
+SP_GET_ALL_BRANCHES      = "EXEC dbo.WN_Branches_GetList"
+SP_GET_ALL_COMPANIES     = "EXEC dbo.WN_Companies_GetList"
+SP_GET_ALL_CITIES        = "EXEC dbo.WN_Cities_GetList"
+
+DEFAULT_COMPANY_ID = 484
 
 # Auto-Assignment Booking System Stored Procedures
 SP_GET_AVAILABLE_SPACES = "EXEC dbo.WN_GetAvailableSpaces %s, %s, %s"
@@ -85,7 +90,10 @@ def sync_user(email: str, first_name: str, last_name: str, phone: str = None) ->
             new_id   = row[0] if row else None
             new_guid = str(row[1]) if (row and len(row) > 1 and row[1]) else None
             if new_id:
-                cursor.execute("UPDATE dbo.WN_Users SET RoleId = 14 WHERE Id = %d", (new_id,))
+                cursor.execute(
+                    "UPDATE dbo.WN_Users SET RoleId = 14, CompanyId = %d WHERE Id = %d",
+                    (DEFAULT_COMPANY_ID, new_id)
+                )
             conn.commit()
             return (new_id, new_guid)
     except Exception as e:
@@ -348,7 +356,62 @@ def get_all_locations():
                 row["name"] = row["Name"]
             status = row.get("status") or row.get("Status") or row.get("IsActive") or row.get("isActive")
             row["isActive"] = bool(status) if status is not None else True
+            row["cityId"]    = row.get("cityId")
+            row["cityName"]  = row.get("cityName") or ""
+            row["branchId"]  = row.get("branchId")
+            row["branchName"]= row.get("branchName") or ""
+            row["branchCode"]= row.get("branchCode") or ""
         return rows
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_all_cities():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_ALL_CITIES)
+        rows = cursor.fetchall()
+        return [{
+            "id":     row.get("id"),
+            "idGuid": str(row.get("idGuid") or ""),
+            "name":   row.get("name") or "",
+        } for row in rows]
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_all_branches():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_ALL_BRANCHES)
+        rows = cursor.fetchall()
+        return [{
+            "id":          row.get("Id"),
+            "description": row.get("Description") or "",
+            "code":        row.get("Code") or "",
+        } for row in rows]
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_all_companies():
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_ALL_COMPANIES)
+        rows = cursor.fetchall()
+        return [{
+            "id":   row.get("Id"),
+            "name": row.get("CompanyName") or "",
+        } for row in rows]
     except Exception as e:
         raise e
     finally:
@@ -443,6 +506,7 @@ def get_all_users():
                 "createdAt": _iso(row.get("createdAt")),
                 "isActive":  True,
                 "role":      map_role(row.get("roles_int")),
+                "companyId": row.get("companyId") or DEFAULT_COMPANY_ID,
             })
         return result
     except Exception as e:

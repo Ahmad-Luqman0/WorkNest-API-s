@@ -49,7 +49,10 @@ try:
         get_available_spaces_by_type,
         reassign_booking,
         get_available_spaces_for_reassignment,
-        get_booking_calendar
+        get_booking_calendar,
+        get_all_branches,
+        get_all_companies,
+        get_all_cities
     )
 except ImportError:
     from db import (
@@ -85,7 +88,10 @@ except ImportError:
         get_available_spaces_by_type,
         reassign_booking,
         get_available_spaces_for_reassignment,
-        get_booking_calendar
+        get_booking_calendar,
+        get_all_branches,
+        get_all_companies,
+        get_all_cities
     )
 
 app = FastAPI(title="WorkNest API", version="1.0.0")
@@ -216,10 +222,11 @@ class VoucherGenerateRequest(BaseModel):
 class LocationUpsertRequest(BaseModel):
     name: str
     address: Optional[str] = None
-    city: Optional[str] = None
+    cityId: Optional[int] = None
     openingTime: Optional[str] = None
     closingTime: Optional[str] = None
     isActive: Optional[bool] = True
+    branchId: Optional[int] = None
 
 class SpaceTypeUpsertRequest(BaseModel):
     name: str
@@ -604,9 +611,9 @@ def create_location(payload: LocationUpsertRequest):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO dbo.WN_Locations (Name, Address, City, OpeningTime, ClosingTime, IsActive, Status)
-            VALUES (%s, %s, %s, %s, %s, %d, 1); SELECT SCOPE_IDENTITY() AS id
-        """, (payload.name, payload.address, payload.city, payload.openingTime, payload.closingTime, 1 if payload.isActive else 0))
+            INSERT INTO dbo.WN_Locations (Name, Address, CityId, OpeningTime, ClosingTime, IsActive, Status, BranchId)
+            VALUES (%s, %s, %s, %s, %s, %d, 1, %s); SELECT SCOPE_IDENTITY() AS id
+        """, (payload.name, payload.address, payload.cityId, payload.openingTime, payload.closingTime, 1 if payload.isActive else 0, payload.branchId))
         row = cursor.fetchone()
         conn.commit()
         conn.close()
@@ -621,9 +628,9 @@ def update_location(id: str, payload: LocationUpsertRequest):
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE dbo.WN_Locations SET Name=%s, Address=%s, City=%s,
-            OpeningTime=%s, ClosingTime=%s, IsActive=%d WHERE IdGUID=%s
-        """, (payload.name, payload.address, payload.city, payload.openingTime, payload.closingTime, 1 if payload.isActive else 0, id))
+            UPDATE dbo.WN_Locations SET Name=%s, Address=%s, CityId=%s,
+            OpeningTime=%s, ClosingTime=%s, IsActive=%d, BranchId=%s WHERE IdGUID=%s
+        """, (payload.name, payload.address, payload.cityId, payload.openingTime, payload.closingTime, 1 if payload.isActive else 0, payload.branchId, id))
         conn.commit()
         conn.close()
         return ok(message="Location updated.")
@@ -1669,6 +1676,33 @@ def list_all_gallery():
 def list_all_space_types():
     try:
         return ok(get_all_space_types())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Branches & Companies ──────────────────────────────────────────────────────
+
+@app.get("/api/branch")
+@app.get("/branch")
+def list_branches():
+    try:
+        return ok(get_all_branches())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/company")
+@app.get("/company")
+def list_companies():
+    try:
+        return ok(get_all_companies())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/city")
+@app.get("/city")
+def list_cities():
+    try:
+        return ok(get_all_cities())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -56,7 +56,7 @@ DEFAULT_COMPANY_ID = 484
 
 # Auto-Assignment Booking System Stored Procedures
 SP_GET_AVAILABLE_SPACES = "EXEC dbo.WN_GetAvailableSpaces %s, %s, %s"
-SP_CREATE_BOOKING_AUTO_ASSIGN = "EXEC dbo.WN_CreateBookingWithAutoAssignment %s, %s, %s, %s, %s, %s, %s, %s"
+SP_CREATE_BOOKING_AUTO_ASSIGN = "EXEC dbo.WN_CreateBookingWithAutoAssignment"  # called inline with OUTPUT params
 SP_GET_AVAILABILITY_COUNTS = "EXEC dbo.WN_GetAvailabilityCounts"
 SP_GET_AVAILABLE_BY_TYPE = "EXEC dbo.WN_GetAvailableSpacesByType %s, %s, %s"
 SP_REASSIGN_BOOKING = "EXEC dbo.WN_ReassignBooking %s, %s, %s"
@@ -180,19 +180,24 @@ def get_gallery_images():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_GALLERY_IMAGES)
+        cursor.execute("""
+            SELECT Id, IdGUID, Title, ImageUrl, SortOrder, IsActive, Status
+            FROM dbo.WN_GalleryImages
+            WHERE ISNULL(IsActive, 1) = 1 AND ISNULL(Status, 1) != 0
+            ORDER BY ISNULL(SortOrder, 9999), Id
+        """)
         rows = cursor.fetchall()
         result = []
         for row in rows:
-            guid = str(row.get("IdGuid") or row.get("IdGUID") or row.get("idGuid") or "")
+            guid = str(row.get("IdGUID") or "")
             result.append({
                 "id":        guid,
-                "numericId": row.get("Id") or row.get("id"),
+                "numericId": row.get("Id"),
                 "idGuid":    guid,
-                "title":     row.get("Title") or row.get("title") or "",
-                "imageUrl":  row.get("ImageUrl") or row.get("imageUrl") or "",
-                "sortOrder": row.get("SortOrder") or row.get("sortOrder") or 0,
-                "isActive":  bool(row.get("IsActive") if row.get("IsActive") is not None else row.get("isActive", True)),
+                "title":     row.get("Title") or "",
+                "imageUrl":  row.get("ImageUrl") or "",
+                "sortOrder": row.get("SortOrder") or 0,
+                "isActive":  True,
             })
         return result
     except Exception as e:
@@ -240,13 +245,36 @@ def get_my_bookings(user_id: int):
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_MY_BOOKINGS, (user_id,))
+        cursor.execute("""
+            SELECT
+                b.IdGUID AS idGuid,
+                b.Id AS id,
+                ISNULL(s.Name, st.Description) AS spaceName,
+                st.Description AS spaceTypeName,
+                b.StartDateTime AS startDateTime,
+                b.EndDateTime AS endDateTime,
+                b.TotalAmount AS totalAmount,
+                b.Notes AS notes,
+                b.CreatedOn AS createdAt,
+                CASE b.BookingStatus
+                    WHEN 1 THEN 'Confirmed'
+                    WHEN 2 THEN 'Cancelled'
+                    WHEN 3 THEN 'Rejected'
+                    WHEN 4 THEN 'Completed'
+                    ELSE 'Confirmed'
+                END AS bookingStatus
+            FROM dbo.WN_Bookings b WITH (NOLOCK)
+            INNER JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+            LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
+            WHERE u.Id = %d AND b.Status != 0
+            ORDER BY b.CreatedOn DESC
+        """, (user_id,))
         rows = cursor.fetchall()
         for row in rows:
-            row["idGuid"] = row.get("IdGUID") or row.get("idGuid")
-            row["id"] = row.get("Id") or row.get("id")
-            if row.get("totalAmount") is not None:
-                row["totalAmount"] = float(row["totalAmount"])
+            row["idGuid"] = str(row.get("idGuid") or "")
+            row["id"]     = row.get("id")
+            row["totalAmount"]   = float(row["totalAmount"]) if row.get("totalAmount") is not None else 0.0
             row["startDateTime"] = _iso(row.get("startDateTime"))
             row["endDateTime"]   = _iso(row.get("endDateTime"))
             row["createdAt"]     = _iso(row.get("createdAt"))
@@ -419,7 +447,7 @@ def get_booking_by_id(user_id: int, booking_id: int):
             SELECT
                 b.IdGUID AS idGuid,
                 b.Id AS id,
-                st.Description AS spaceName,
+                ISNULL(s.Name, st.Description) AS spaceName,
                 b.StartDateTime AS startDateTime,
                 b.EndDateTime AS endDateTime,
                 b.TotalAmount AS totalAmount,
@@ -429,7 +457,8 @@ def get_booking_by_id(user_id: int, booking_id: int):
                     ELSE 'Confirmed'
                 END AS bookingStatus
             FROM dbo.WN_Bookings b
-            LEFT JOIN dbo.WN_SpaceTypes st ON b.SpaceGuid = st.IdGUID
+            LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
             WHERE b.Id = %d AND b.UserGuid = %s
         """
         cursor.execute(query, (booking_id, user_guid))
@@ -501,20 +530,44 @@ def get_all_bookings():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_ALL_BOOKINGS)
+        cursor.execute("""
+            SELECT
+                b.IdGUID AS idGuid,
+                b.Id AS id,
+                u.Email AS userEmail,
+                ISNULL(s.Name, st.Description) AS spaceName,
+                st.Description AS spaceTypeName,
+                b.StartDateTime AS startDateTime,
+                b.EndDateTime AS endDateTime,
+                b.TotalAmount AS totalAmount,
+                b.Notes AS notes,
+                b.CreatedOn AS createdAt,
+                CASE b.BookingStatus
+                    WHEN 1 THEN 'Confirmed'
+                    WHEN 2 THEN 'Cancelled'
+                    WHEN 3 THEN 'Rejected'
+                    WHEN 4 THEN 'Completed'
+                    ELSE 'Confirmed'
+                END AS bookingStatus
+            FROM dbo.WN_Bookings b WITH (NOLOCK)
+            LEFT JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+            LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
+            WHERE b.Status != 0
+            ORDER BY b.CreatedOn DESC
+        """)
         rows = cursor.fetchall()
         for row in rows:
-            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = row.get("Id") or row.get("id")
-            row["idGuid"] = guid
-            amount = row.get("totalAmount") or row.get("TotalAmount") or row.get("Total_Amount") or 0
-            row["totalAmount"]   = float(amount) if amount is not None else 0.0
-            row["startDateTime"] = _iso(row.get("startDateTime") or row.get("StartDateTime"))
-            row["endDateTime"]   = _iso(row.get("endDateTime")   or row.get("EndDateTime"))
-            row["createdAt"]     = _iso(row.get("createdAt")     or row.get("CreatedAt"))
-            row["userEmail"]     = row.get("userEmail")     or row.get("UserEmail")     or row.get("Email") or ""
-            row["spaceName"]     = row.get("spaceName")     or row.get("SpaceName")     or row.get("Name") or ""
-            row["bookingStatus"] = row.get("bookingStatus") or row.get("BookingStatus") or ""
+            guid = str(row.get("idGuid") or row.get("IdGUID") or "")
+            row["id"]            = row.get("id") or row.get("Id")
+            row["idGuid"]        = guid
+            row["userEmail"]     = row.get("userEmail") or ""
+            row["spaceName"]     = row.get("spaceName") or ""
+            row["bookingStatus"] = row.get("bookingStatus") or ""
+            row["totalAmount"]   = float(row.get("totalAmount") or 0)
+            row["startDateTime"] = _iso(row.get("startDateTime"))
+            row["endDateTime"]   = _iso(row.get("endDateTime"))
+            row["createdAt"]     = _iso(row.get("createdAt"))
         return rows
     except Exception as e:
         raise e
@@ -529,12 +582,16 @@ def get_all_payments():
         cursor.execute(SP_GET_ALL_PAYMENTS)
         rows = cursor.fetchall()
         for row in rows:
-            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = row.get("Id") or row.get("id")
-            row["idGuid"] = guid
-            if row.get("amount") is not None:
-                row["amount"] = float(row["amount"])
-            row["paidAt"] = _iso(row.get("paidAt"))
+            # SP returns camelCase: idGuid, id, userEmail, amount, paymentMethod, paymentStatus, transactionRef, paidAt
+            guid = str(row.get("idGuid") or row.get("IdGUID") or "")
+            row["id"]            = row.get("id") or row.get("Id")
+            row["idGuid"]        = guid
+            row["userEmail"]     = row.get("userEmail") or row.get("UserEmail") or ""
+            row["paymentMethod"] = row.get("paymentMethod") or row.get("PaymentMethod") or ""
+            row["paymentStatus"] = row.get("paymentStatus") or row.get("PaymentStatus") or ""
+            row["transactionRef"]= row.get("transactionRef") or row.get("TransactionRef") or ""
+            row["amount"]        = float(row.get("amount") or row.get("Amount") or 0)
+            row["paidAt"]        = _iso(row.get("paidAt") or row.get("PaidAt"))
         return rows
     except Exception as e:
         raise e
@@ -570,14 +627,27 @@ def get_all_contacts():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_ALL_CONTACTS)
+        cursor.execute("""
+            SELECT IdGUID, Id, Name, Email, PhoneNumber, Message, CreatedOn, Status
+            FROM dbo.WN_BookTour
+            WHERE ISNULL(Status, 1) != 0
+            ORDER BY CreatedOn DESC
+        """)
         rows = cursor.fetchall()
+        result = []
         for row in rows:
-            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
-            row["id"] = row.get("Id") or row.get("id")
-            row["idGuid"] = guid
-            row["createdAt"] = _iso(row.get("createdAt"))
-        return rows
+            guid = str(row.get("IdGUID") or "")
+            result.append({
+                "id":        row.get("Id"),
+                "idGuid":    guid,
+                "fullName":  row.get("Name") or "",
+                "email":     row.get("Email") or "",
+                "phone":     row.get("PhoneNumber") or "",
+                "message":   row.get("Message") or "",
+                "status":    row.get("Status"),
+                "createdAt": _iso(row.get("CreatedOn")),
+            })
+        return result
     except Exception as e:
         raise e
     finally:
@@ -705,46 +775,67 @@ def get_available_spaces(space_type: str, start_datetime: str, end_datetime: str
         conn.close()
 
 
-def create_booking_with_auto_assignment(user_email: str, space_type: str, start_datetime: str, 
+def create_booking_with_auto_assignment(user_email: str, space_type: str, start_datetime: str,
                                         end_datetime: str, notes: str = "", total_amount: float = 0,
                                         payment_method: str = None, payment_ref: str = None):
-    """Create booking with automatic space assignment using stored procedure."""
-    conn = get_connection()
+    """Create booking with automatic space assignment using WN_CreateBookingWithAutoAssignment SP."""
+    conn = pymssql.connect(
+        server=DB_SERVER, port=DB_PORT,
+        user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
+        autocommit=True  # required: SP manages its own transaction with COMMIT
+    )
     try:
-        cursor = conn.cursor()
-        
-        # Call stored procedure with output parameters
+        cursor = conn.cursor(as_dict=True)
+        # Ensure user Status = 1 so the SP's WHERE Status = 1 check passes
+        cursor.execute("UPDATE dbo.WN_Users SET Status = 1 WHERE Email = %s AND (Status IS NULL OR Status != 1)", (user_email,))
+        # pymssql does not support OUTPUT params directly — use a wrapper SELECT
         cursor.execute("""
-            DECLARE @bookingId INT, @bookingGuid UNIQUEIDENTIFIER, 
-                    @assignedSpaceId INT, @assignedSpaceName NVARCHAR(255);
-            
-            EXEC dbo.sp_CreateBookingWithAutoAssignment 
-                @userEmail = %s, @spaceType = %s, @startDateTime = %s, @endDateTime = %s,
-                @notes = %s, @totalAmount = %s, @paymentMethod = %s, @paymentRef = %s,
-                @bookingId = @bookingId OUTPUT, @bookingGuid = @bookingGuid OUTPUT,
-                @assignedSpaceId = @assignedSpaceId OUTPUT, @assignedSpaceName = @assignedSpaceName OUTPUT;
-            
-            SELECT @bookingId AS bookingId, @bookingGuid AS bookingGuid, 
-                   @assignedSpaceId AS assignedSpaceId, @assignedSpaceName AS assignedSpaceName;
-        """, (user_email, space_type, start_datetime, end_datetime, notes, total_amount, payment_method, payment_ref))
-        
-        result = cursor.fetchone()
-        conn.commit()
-        
-        if result:
-            return {
-                "id": result[0],  # bookingId
-                "idGuid": str(result[1]) if result[1] else None,  # bookingGuid
-                "assignedSpaceId": result[2],  # assignedSpaceId
-                "assignedSpaceName": result[3],  # assignedSpaceName
-                "spaceType": space_type,
-                "isAutoAssigned": True
-            }
-        else:
-            raise Exception("Failed to create booking with auto-assignment")
-            
+            DECLARE @BookingId INT, @BookingGuid UNIQUEIDENTIFIER,
+                    @AssignedSpaceId INT, @AssignedSpaceName NVARCHAR(255);
+
+            EXEC dbo.WN_CreateBookingWithAutoAssignment
+                @Email          = %s,
+                @SpaceType      = %s,
+                @StartDateTime  = %s,
+                @EndDateTime    = %s,
+                @Notes          = %s,
+                @TotalAmount    = %s,
+                @PaymentMethod  = %s,
+                @PaymentRef     = %s,
+                @BookingId      = @BookingId      OUTPUT,
+                @BookingGuid    = @BookingGuid    OUTPUT,
+                @AssignedSpaceId   = @AssignedSpaceId   OUTPUT,
+                @AssignedSpaceName = @AssignedSpaceName OUTPUT;
+
+            SELECT @BookingId AS bookingId, CAST(@BookingGuid AS NVARCHAR(36)) AS bookingGuid,
+                   @AssignedSpaceId AS assignedSpaceId, @AssignedSpaceName AS assignedSpaceName;
+        """, (
+            user_email, space_type, start_datetime, end_datetime,
+            notes or '', total_amount,
+            payment_method, payment_ref
+        ))
+
+        # Advance past any empty result sets from SET NOCOUNT ON
+        row = None
+        while True:
+            row = cursor.fetchone()
+            if row is not None:
+                break
+            if not cursor.nextset():
+                break
+
+        if not row or not row.get('bookingId'):
+            raise Exception('Auto-assignment booking returned no result')
+
+        return {
+            'id':                row['bookingId'],
+            'idGuid':            row['bookingGuid'],
+            'assignedSpaceId':   row['assignedSpaceId'],
+            'assignedSpaceName': row['assignedSpaceName'],
+            'spaceType':         space_type,
+            'isAutoAssigned':    True
+        }
     except Exception as e:
-        conn.rollback()
         raise e
     finally:
         conn.close()

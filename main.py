@@ -96,12 +96,20 @@ except ImportError:
 
 app = FastAPI(title="WorkNest API", version="1.0.0")
 
+ALLOWED_ORIGINS = [
+    "http://localhost:4200",
+    "https://worknest.vercel.app",
+    "https://work-nest-api-s.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 DEFAULT_USER_EMAIL = None  # resolved per-request from x-user-email header
@@ -385,8 +393,11 @@ def google_login_user(payload: GoogleLoginRequest):
             return ok({"id": guid, "email": row["Email"], "roles": [role]}, "Google login successful.")
         user_id, user_guid = sync_user(payload.email, payload.firstName or "", payload.lastName or "")
         return ok({"id": user_guid or user_id, "email": payload.email, "roles": [map_role(None)]}, "Google login successful.")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return 200 with error flag so CORS headers are always present
+        return {"isSuccessful": False, "message": str(e), "data": None}
 
 
 # ── Users ─────────────────────────────────────────────────────────────────────

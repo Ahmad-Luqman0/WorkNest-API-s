@@ -142,38 +142,32 @@ def get_all_spaces():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute("""
-            SELECT s.IdGUID, s.Id, s.Name, s.Code, s.Description, s.Floor,
-                   s.PricePerDay, s.PricePerHour, s.Amenities, s.ImageUrl, s.Status,
-                   l.Name AS LocationName, l.IdGUID AS LocationIdGuid,
-                   st.Description AS SpaceTypeName, st.IdGUID AS SpaceTypeIdGuid,
-                   st.Capacity
-            FROM dbo.WN_Spaces s
-            LEFT JOIN dbo.WN_Locations l ON s.LocationId = l.IdGUID
-            LEFT JOIN dbo.WN_SpaceTypes st ON s.SpaceTypeId = st.IdGUID
-            WHERE s.Status != 0
-        """)
+        cursor.execute(SP_GET_ALL_SPACES)
         rows = cursor.fetchall()
         result = []
         for row in rows:
-            price_val = row.get("PricePerDay") or row.get("pricePerDay")
-            guid = str(row.get("IdGUID") or row.get("idGuid") or "")
+            # SP returns camelCase aliases: idGuid, id, name, pricePerDay, etc.
+            guid = str(row.get("idGuid") or row.get("IdGUID") or "")
+            price_val = row.get("pricePerDay") or row.get("PricePerDay")
+            status_val = row.get("status") or row.get("Status")
             result.append({
-                "id":             row.get("Id") or row.get("id"),
+                "id":             row.get("id") or row.get("Id"),
                 "idGuid":         guid,
-                "name":           row.get("Name") or row.get("name"),
-                "code":           row.get("Code") or row.get("code"),
-                "locationIdGuid": str(row.get("LocationIdGuid") or ""),
-                "spaceTypeIdGuid":str(row.get("SpaceTypeIdGuid") or ""),
-                "locationName":   row.get("LocationName") or row.get("locationName"),
-                "spaceTypeName":  row.get("SpaceTypeName") or row.get("spaceTypeName"),
-                "capacity":       row.get("Capacity") or row.get("capacity"),
+                "name":           row.get("name") or row.get("Name") or "",
+                "code":           row.get("code") or row.get("Code") or "",
+                "floor":          row.get("floor") or row.get("Floor") or "",
+                "description":    row.get("description") or row.get("Description") or "",
+                "locationIdGuid": str(row.get("locationIdGuid") or row.get("LocationIdGuid") or ""),
+                "spaceTypeIdGuid":str(row.get("spaceTypeIdGuid") or row.get("SpaceTypeIdGuid") or ""),
+                "locationName":   row.get("locationName") or row.get("LocationName") or "",
+                "spaceTypeName":  row.get("spaceTypeName") or row.get("SpaceTypeName") or "",
+                "capacity":       row.get("capacity") or row.get("Capacity"),
                 "pricePerDay":    float(price_val) if price_val is not None else 0.0,
-                "pricePerHour":   float(row.get("PricePerHour") or row.get("pricePerHour") or 0),
-                "amenities":      row.get("Amenities") or row.get("amenities"),
-                "imageUrl":       row.get("ImageUrl") or row.get("imageUrl"),
-                "status":         row.get("Status") or row.get("status"),
-                "spaceStatus":    "Available" if (row.get("Status") or row.get("status")) == 1 else "Inactive",
+                "pricePerHour":   float(row.get("pricePerHour") or row.get("PricePerHour") or 0),
+                "amenities":      row.get("amenities") or row.get("Amenities") or "",
+                "imageUrl":       row.get("imageUrl") or row.get("ImageUrl") or "",
+                "status":         status_val,
+                "spaceStatus":    "Available" if status_val == 1 else "Inactive",
             })
         return result
     except Exception as e:
@@ -186,25 +180,19 @@ def get_gallery_images():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute("""
-            SELECT Id, IdGUID, Title, ImageUrl, SortOrder, IsActive, CreatedOn AS createdAt
-            FROM dbo.WN_GalleryImages
-            WHERE Status = 1
-            ORDER BY ISNULL(SortOrder, 9999), Id
-        """)
+        cursor.execute(SP_GET_GALLERY_IMAGES)
         rows = cursor.fetchall()
         result = []
         for row in rows:
-            guid = str(row.get("IdGUID") or "")
+            guid = str(row.get("IdGuid") or row.get("IdGUID") or row.get("idGuid") or "")
             result.append({
                 "id":        guid,
-                "numericId": row.get("Id"),
+                "numericId": row.get("Id") or row.get("id"),
                 "idGuid":    guid,
-                "title":     row.get("Title") or "",
-                "imageUrl":  row.get("ImageUrl") or "",
-                "sortOrder": row.get("SortOrder") or 0,
-                "isActive":  bool(row.get("IsActive")) if row.get("IsActive") is not None else True,
-                "createdAt": _iso(row.get("createdAt")),
+                "title":     row.get("Title") or row.get("title") or "",
+                "imageUrl":  row.get("ImageUrl") or row.get("imageUrl") or "",
+                "sortOrder": row.get("SortOrder") or row.get("sortOrder") or 0,
+                "isActive":  bool(row.get("IsActive") if row.get("IsActive") is not None else row.get("isActive", True)),
             })
         return result
     except Exception as e:
@@ -486,27 +474,21 @@ def get_all_users():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute("""
-            SELECT u.IdGUID AS idGuid, u.Id AS numericId, u.Email AS email,
-                   u.Name AS name, u.PhoneNumber AS phone,
-                   u.CreatedOn AS createdAt, u.RoleId AS roles_int
-            FROM dbo.WN_Users u WITH (NOLOCK)
-            ORDER BY u.CreatedOn DESC
-        """)
+        cursor.execute(SP_GET_ALL_USERS)
         rows = cursor.fetchall()
         result = []
         for row in rows:
-            guid = str(row["idGuid"]) if row.get("idGuid") else ""
+            guid = str(row.get("IdGuid") or row.get("idGuid") or row.get("IdGUID") or "")
             result.append({
-                "id":        row.get("numericId"),
+                "id":        row.get("Id") or row.get("id") or row.get("numericId"),
                 "idGuid":    guid,
-                "email":     row.get("email") or "",
-                "name":      row.get("name") or "",
-                "phone":     row.get("phone") or "",
-                "createdAt": _iso(row.get("createdAt")),
+                "email":     row.get("Email") or row.get("email") or "",
+                "name":      row.get("Name") or row.get("name") or "",
+                "phone":     row.get("Phone") or row.get("phone") or "",
+                "createdAt": _iso(row.get("CreatedAt") or row.get("createdAt")),
                 "isActive":  True,
-                "role":      map_role(row.get("roles_int")),
-                "companyId": row.get("companyId") or DEFAULT_COMPANY_ID,
+                "role":      map_role(row.get("Roles_Int") or row.get("roles_int")),
+                "companyId": row.get("CompanyId") or row.get("companyId") or DEFAULT_COMPANY_ID,
             })
         return result
     except Exception as e:

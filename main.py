@@ -114,6 +114,8 @@ ALLOWED_ORIGINS = [
     "http://localhost:4200",
     "https://worknest.vercel.app",
     "https://work-nest-api-s.vercel.app",
+    "https://worknestpk.com",
+    "https://www.worknestpk.com",
 ]
 
 app.add_middleware(

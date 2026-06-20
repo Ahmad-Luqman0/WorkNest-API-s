@@ -119,8 +119,7 @@ def get_user_id_by_email(email: str) -> tuple:
         row = cursor.fetchone()
         if row:
             return (row[0], str(row[1]) if row[1] else None)
-        default_name = email.split("@")[0]
-        return sync_user(email, default_name, "")
+        return (None, None)
     except Exception:
         return (None, None)
     finally:
@@ -135,6 +134,16 @@ def book_tour(name: str, email: str, message: str, phone_number: str, user_id: i
         row = cursor.fetchone()
         new_id = row[0] if row else None
         conn.commit()
+        if new_id is None:
+            # SP did not return an ID — insert directly as fallback
+            cursor.execute("""
+                INSERT INTO dbo.WN_BookTour (Name, Email, PhoneNumber, Message, UserId, Status, CreatedOn)
+                VALUES (%s, %s, %s, %s, %s, 1, GETDATE());
+                SELECT SCOPE_IDENTITY() AS id
+            """, (name, email, phone_number, message, user_id))
+            row = cursor.fetchone()
+            new_id = row[0] if row else None
+            conn.commit()
         return new_id
     except Exception as e:
         conn.rollback()

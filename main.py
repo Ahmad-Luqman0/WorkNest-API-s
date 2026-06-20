@@ -52,7 +52,14 @@ try:
         get_booking_calendar,
         get_all_branches,
         get_all_companies,
-        get_all_cities
+        get_all_cities,
+        # Space config
+        get_space_config,
+        update_space_config,
+        generate_space_inventory,
+        check_booking_overlap,
+        get_available_spaces_v2,
+        create_smart_booking,
     )
 except ImportError:
     from db import (
@@ -91,7 +98,14 @@ except ImportError:
         get_booking_calendar,
         get_all_branches,
         get_all_companies,
-        get_all_cities
+        get_all_cities,
+        # Space config
+        get_space_config,
+        update_space_config,
+        generate_space_inventory,
+        check_booking_overlap,
+        get_available_spaces_v2,
+        create_smart_booking,
     )
 
 app = FastAPI(title="WorkNest API", version="1.0.0")
@@ -272,6 +286,30 @@ class PaymentCreateRequest(BaseModel):
 
 class ReassignBookingRequest(BaseModel):
     spaceId: int
+
+class SpaceConfigUpdateRequest(BaseModel):
+    totalSpaces: int = Field(..., ge=1)
+    defaultCapacities: Optional[str] = None   # comma-sep e.g. '3,4,5'
+    openingTime: Optional[str] = None          # 'HH:MM'
+    closingTime: Optional[str] = None
+
+class SpaceInventoryRequest(BaseModel):
+    spaceCategory: str
+    spaceTypeId: int
+    locationId: int
+    pricePerHour: Optional[float] = 0.0
+    pricePerDay: Optional[float] = 0.0
+
+class SmartBookingRequest(BaseModel):
+    """Intelligent booking request — backend auto-assigns closest available space."""
+    spaceCategory: str            # 'Shared' | 'Private' | 'Meeting'
+    startDateTime: str
+    endDateTime: str
+    capacity: Optional[int] = None  # required for Private/Meeting
+    notes: Optional[str] = None
+    totalAmount: Optional[float] = 0.0
+    paymentMethod: Optional[str] = None
+    paymentRef: Optional[str] = None
 
 class FloorUpsertRequest(BaseModel):
     locationId: int
@@ -1765,6 +1803,110 @@ def create_amenity(payload: AmenityUpsertRequest):
         conn.commit()
         conn.close()
         return ok({"id": row[0] if row else None}, "Amenity created.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Space Configuration (Admin) ──────────────────────────────────────────────
+
+@app.get("/api/space-config")
+@app.get("/space-config")
+def get_space_config_endpoint():
+    """Get all space category configuration."""
+    try:
+        return ok(get_space_config())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/space-config/{category}")
+@app.put("/space-config/{category}")
+def update_space_config_endpoint(
+    category: str,
+    payload: SpaceConfigUpdateRequest,
+    x_user_email: Optional[str] = Header(None)
+):
+    """Update space category config (admin only)."""
+    try:
+        update_space_config(
+            category,
+            payload.totalSpaces,
+            payload.defaultCapacities,
+            payload.openingTime,
+            payload.closingTime,
+            x_user_email
+        )
+        return ok(message=f"Space config for '{category}' updated.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/space-config/generate-inventory", status_code=201)
+@app.post("/space-config/generate-inventory", status_code=201)
+def generate_inventory_endpoint(payload: SpaceInventoryRequest):
+    """Generate or sync space inventory for a category."""
+    try:
+        result = generate_space_inventory(
+            payload.spaceCategory, payload.spaceTypeId, payload.locationId,
+            payload.pricePerHour or 0, payload.pricePerDay or 0
+        )
+        return ok(result, "Inventory generated/synced.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Smart Booking (Auto-Assignment) ───────────────────────────────────────────
+
+@app.post("/api/booking/smart", status_code=201)
+@app.post("/booking/smart", status_code=201)
+def make_smart_booking(
+    payload: SmartBookingRequest,
+    x_user_email: Optional[str] = Header(None)
+):
+    """Create booking with intelligent closest-space auto-assignment."""
+    try:
+        if not x_user_email:
+            raise HTTPException(status_code=401, detail="User email header required")
+
+        result = create_smart_booking(
+            x_user_email,
+            payload.spaceCategory,
+            payload.startDateTime,
+            payload.endDateTime,
+            payload.notes or "",
+            payload.totalAmount or 0.0,
+            payload.paymentMethod,
+            payload.paymentRef,
+            payload.capacity,
+        )
+        return ok({
+            "success": True,
+            "id": result.get("id"),
+            "bookingId": result.get("idGuid") or result.get("id"),
+            "assignedSpace": result.get("assignedSpaceCode"),
+            "assignedSpaceName": result.get("assignedSpaceName"),
+            "assignedSpaceId":  result.get("assignedSpaceId"),
+            "spaceCategory":    result.get("spaceCategory"),
+            "totalAmount":      payload.totalAmount,
+        }, "Booking created with auto-assigned space.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/booking/smart/available")
+@app.get("/booking/smart/available")
+def smart_available_spaces(
+    spaceCategory: str = Query(...),
+    startDateTime: str = Query(...),
+    endDateTime: str = Query(...),
+    capacity: Optional[int] = Query(None)
+):
+    """Get available spaces for smart booking (v2, category-based)."""
+    try:
+        result = get_available_spaces_v2(spaceCategory, startDateTime, endDateTime, capacity)
+        return ok(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

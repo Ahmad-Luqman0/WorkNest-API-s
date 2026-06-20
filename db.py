@@ -63,6 +63,11 @@ SP_REASSIGN_BOOKING = "EXEC dbo.WN_ReassignBooking %s, %s, %s"
 SP_GET_SPACES_FOR_REASSIGNMENT = "EXEC dbo.WN_GetAvailableSpacesForReassignment %s, %s, %s, %s"
 SP_GET_BOOKING_CALENDAR = "EXEC dbo.WN_GetBookingCalendar %s, %s, %s"
 
+# Space configuration SPs
+SP_GET_SPACE_CONFIG    = "EXEC dbo.WN_Spaces_GetConfig"
+SP_CHECK_OVERLAP       = "EXEC dbo.WN_Booking_CheckOverlap %s, %s, %s"
+SP_GET_AVAILABLE_V2    = "EXEC dbo.WN_Booking_GetAvailableSpaces %s, %s, %s, %s"
+
 
 def _iso(val):
     return val.isoformat() if val and hasattr(val, "isoformat") else val
@@ -973,6 +978,180 @@ def get_available_spaces_for_reassignment(space_type: str, start_datetime: str, 
                 "locationName": row.get("LocationName") or ""
             })
         return result
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_space_config():
+    """Get all space category configuration from WN_SpaceConfig."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_SPACE_CONFIG)
+        rows = cursor.fetchall()
+        return [{
+            "id":                row.get("Id"),
+            "spaceCategory":     row.get("SpaceCategory") or "",
+            "totalSpaces":       row.get("TotalSpaces") or 0,
+            "codePrefix":        row.get("CodePrefix") or "",
+            "minCode":           row.get("MinCode") or 0,
+            "defaultCapacities": row.get("DefaultCapacities") or "",
+            "openingTime":       row.get("OpeningTime") or "",
+            "closingTime":       row.get("ClosingTime") or "",
+            "updatedOn":         _iso(row.get("UpdatedOn")),
+            "updatedBy":         row.get("UpdatedBy") or "",
+        } for row in rows]
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def update_space_config(space_category: str, total_spaces: int,
+                        default_capacities: str = None, opening_time: str = None,
+                        closing_time: str = None, admin_email: str = None):
+    """Update space category config via WN_Spaces_UpdateConfig."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "EXEC dbo.WN_Spaces_UpdateConfig %s, %s, %s, %s, %s, %s",
+            (space_category, total_spaces, default_capacities,
+             opening_time, closing_time, admin_email)
+        )
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def generate_space_inventory(space_category: str, space_type_id: int, location_id: int,
+                              price_per_hour: float = 0, price_per_day: float = 0):
+    """Generate/sync space inventory via WN_Spaces_GenerateInventory."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(
+            "EXEC dbo.WN_Spaces_GenerateInventory %s, %s, %s, %s, %s",
+            (space_category, space_type_id, location_id, price_per_hour, price_per_day)
+        )
+        row = cursor.fetchone()
+        conn.commit()
+        return row or {}
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def check_booking_overlap(space_id: int, start_datetime: str, end_datetime: str,
+                           exclude_booking_id: int = None):
+    """Check if a space has an overlapping booking."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_CHECK_OVERLAP, (space_id, start_datetime, end_datetime))
+        row = cursor.fetchone()
+        return bool(row.get("IsOverlapping")) if row else False
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def get_available_spaces_v2(space_category: str, start_datetime: str,
+                             end_datetime: str, capacity: int = None):
+    """Get available spaces using WN_Booking_GetAvailableSpaces (v2)."""
+    conn = get_connection()
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(SP_GET_AVAILABLE_V2, (space_category, start_datetime, end_datetime, capacity))
+        rows = cursor.fetchall()
+        return [{
+            "id":           row.get("Id"),
+            "idGuid":       str(row.get("IdGUID") or ""),
+            "name":         row.get("Name") or "",
+            "code":         row.get("Code") or "",
+            "codeNumber":   row.get("CodeNumber"),
+            "capacity":     row.get("Capacity"),
+            "pricePerDay":  float(row.get("PricePerDay") or 0),
+            "pricePerHour": float(row.get("PricePerHour") or 0),
+            "spaceType":    row.get("SpaceType") or "",
+            "locationName": row.get("LocationName") or "",
+        } for row in rows]
+    except Exception as e:
+        raise e
+    finally:
+        conn.close()
+
+
+def create_smart_booking(user_email: str, space_category: str, start_datetime: str,
+                          end_datetime: str, notes: str = "", total_amount: float = 0,
+                          payment_method: str = None, payment_ref: str = None,
+                          capacity: int = None):
+    """Create booking with closest-space auto-assignment via WN_Booking_Create."""
+    import pymssql as _pymssql
+    conn = _pymssql.connect(
+        server=DB_SERVER, port=DB_PORT,
+        user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
+        autocommit=True
+    )
+    try:
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute("UPDATE dbo.WN_Users SET Status = 1 WHERE Email = %s AND (Status IS NULL OR Status != 1)", (user_email,))
+        cursor.execute("""
+            DECLARE @BookingId INT, @BookingGuid UNIQUEIDENTIFIER,
+                    @AssignedSpaceId INT, @AssignedSpaceName NVARCHAR(255), @AssignedSpaceCode NVARCHAR(20);
+
+            EXEC dbo.WN_Booking_Create
+                @Email          = %s,
+                @SpaceCategory  = %s,
+                @StartDT        = %s,
+                @EndDT          = %s,
+                @Notes          = %s,
+                @TotalAmount    = %s,
+                @PaymentMethod  = %s,
+                @PaymentRef     = %s,
+                @Capacity       = %s,
+                @BookingId      = @BookingId      OUTPUT,
+                @BookingGuid    = @BookingGuid    OUTPUT,
+                @AssignedSpaceId   = @AssignedSpaceId   OUTPUT,
+                @AssignedSpaceName = @AssignedSpaceName OUTPUT,
+                @AssignedSpaceCode = @AssignedSpaceCode OUTPUT;
+
+            SELECT @BookingId AS bookingId,
+                   CAST(@BookingGuid AS NVARCHAR(36)) AS bookingGuid,
+                   @AssignedSpaceId   AS assignedSpaceId,
+                   @AssignedSpaceName AS assignedSpaceName,
+                   @AssignedSpaceCode AS assignedSpaceCode;
+        """, (
+            user_email, space_category, start_datetime, end_datetime,
+            notes or '', total_amount, payment_method, payment_ref,
+            capacity
+        ))
+        row = None
+        while True:
+            row = cursor.fetchone()
+            if row is not None:
+                break
+            if not cursor.nextset():
+                break
+        if not row or not row.get('bookingId'):
+            raise Exception('Smart booking returned no result')
+        return {
+            'id':                row['bookingId'],
+            'idGuid':            row['bookingGuid'],
+            'assignedSpaceId':   row['assignedSpaceId'],
+            'assignedSpaceName': row['assignedSpaceName'],
+            'assignedSpaceCode': row['assignedSpaceCode'],
+            'spaceCategory':     space_category,
+        }
     except Exception as e:
         raise e
     finally:

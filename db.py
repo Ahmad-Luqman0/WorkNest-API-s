@@ -884,6 +884,19 @@ def create_booking_with_auto_assignment(user_email: str, space_type: str, start_
             if not cursor.nextset():
                 break
 
+        # Fallback: if OUTPUT params came back null, fetch the most recent booking for this user
+        if not row or not row.get('bookingId'):
+            cursor.execute("""
+                SELECT TOP 1 b.Id AS bookingId, CAST(b.IdGUID AS NVARCHAR(36)) AS bookingGuid,
+                       s.Id AS assignedSpaceId, s.Name AS assignedSpaceName
+                FROM dbo.WN_Bookings b
+                INNER JOIN dbo.WN_Users u ON b.UserGuid = u.IdGUID
+                LEFT JOIN dbo.WN_Spaces s ON b.SpaceGuid = s.IdGUID
+                WHERE u.Email = %s AND b.Status = 1
+                ORDER BY b.CreatedOn DESC
+            """, (user_email,))
+            row = cursor.fetchone()
+
         if not row or not row.get('bookingId'):
             raise Exception('Auto-assignment booking returned no result')
 
@@ -1104,46 +1117,17 @@ def create_smart_booking(user_email: str, space_category: str, start_datetime: s
                           end_datetime: str, notes: str = "", total_amount: float = 0,
                           payment_method: str = None, payment_ref: str = None,
                           capacity: int = None):
-    """Create booking with closest-space auto-assignment via WN_Booking_Create."""
-    import pymssql as _pymssql
-    conn = _pymssql.connect(
-        server=DB_SERVER, port=DB_PORT,
-        user=DB_USER, password=DB_PASSWORD, database=DB_NAME,
-        autocommit=True
-    )
+    """Create booking with closest-space auto-assignment via WN_Booking_Create SP."""
+    conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
         cursor.execute("UPDATE dbo.WN_Users SET Status = 1 WHERE Email = %s AND (Status IS NULL OR Status != 1)", (user_email,))
-        cursor.execute("""
-            DECLARE @BookingId INT, @BookingGuid UNIQUEIDENTIFIER,
-                    @AssignedSpaceId INT, @AssignedSpaceName NVARCHAR(255), @AssignedSpaceCode NVARCHAR(20);
-
-            EXEC dbo.WN_Booking_Create
-                @Email          = %s,
-                @SpaceCategory  = %s,
-                @StartDT        = %s,
-                @EndDT          = %s,
-                @Notes          = %s,
-                @TotalAmount    = %s,
-                @PaymentMethod  = %s,
-                @PaymentRef     = %s,
-                @Capacity       = %s,
-                @BookingId      = @BookingId      OUTPUT,
-                @BookingGuid    = @BookingGuid    OUTPUT,
-                @AssignedSpaceId   = @AssignedSpaceId   OUTPUT,
-                @AssignedSpaceName = @AssignedSpaceName OUTPUT,
-                @AssignedSpaceCode = @AssignedSpaceCode OUTPUT;
-
-            SELECT @BookingId AS bookingId,
-                   CAST(@BookingGuid AS NVARCHAR(36)) AS bookingGuid,
-                   @AssignedSpaceId   AS assignedSpaceId,
-                   @AssignedSpaceName AS assignedSpaceName,
-                   @AssignedSpaceCode AS assignedSpaceCode;
-        """, (
-            user_email, space_category, start_datetime, end_datetime,
-            notes or '', total_amount, payment_method, payment_ref,
-            capacity
-        ))
+        cursor.execute(
+            "EXEC dbo.WN_Booking_Create @Email=%s, @SpaceCategory=%s, @StartDT=%s, @EndDT=%s,"
+            " @Notes=%s, @TotalAmount=%s, @PaymentMethod=%s, @PaymentRef=%s, @Capacity=%s",
+            (user_email, space_category, start_datetime, end_datetime,
+             notes or '', total_amount, payment_method, payment_ref, capacity)
+        )
         row = None
         while True:
             row = cursor.fetchone()
@@ -1151,8 +1135,11 @@ def create_smart_booking(user_email: str, space_category: str, start_datetime: s
                 break
             if not cursor.nextset():
                 break
-        if not row or not row.get('bookingId'):
+        conn.commit()
+        if not row:
             raise Exception('Smart booking returned no result')
+        if row.get('errorMessage'):
+            raise Exception(row['errorMessage'])
         return {
             'id':                row['bookingId'],
             'idGuid':            row['bookingGuid'],
@@ -1162,6 +1149,7 @@ def create_smart_booking(user_email: str, space_category: str, start_datetime: s
             'spaceCategory':     space_category,
         }
     except Exception as e:
+        conn.rollback()
         raise e
     finally:
         conn.close()

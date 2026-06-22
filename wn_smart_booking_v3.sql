@@ -323,10 +323,20 @@ BEGIN
     DECLARE @STGuid      UNIQUEIDENTIFIER;
 
     SELECT @UserId = Id, @UserGuid = IdGUID FROM dbo.WN_Users WHERE Email = @Email;
-    IF @UserId IS NULL BEGIN RAISERROR('User not found',16,1); RETURN; END
+    IF @UserId IS NULL
+    BEGIN
+        SELECT NULL AS bookingId, NULL AS bookingGuid, NULL AS assignedSpaceId,
+               NULL AS assignedSpaceName, NULL AS assignedSpaceCode, 'User not found' AS errorMessage;
+        RETURN;
+    END
 
     SELECT @SpaceTypeId = SpaceTypeId FROM dbo.WN_SpaceConfig WHERE SpaceCategory = @SpaceCategory;
-    IF @SpaceTypeId IS NULL BEGIN RAISERROR('Unknown SpaceCategory',16,1); RETURN; END
+    IF @SpaceTypeId IS NULL
+    BEGIN
+        SELECT NULL AS bookingId, NULL AS bookingGuid, NULL AS assignedSpaceId,
+               NULL AS assignedSpaceName, NULL AS assignedSpaceCode, 'Unknown SpaceCategory' AS errorMessage;
+        RETURN;
+    END
 
     SELECT @STGuid = IdGUID FROM dbo.WN_SpaceTypes WHERE Id = @SpaceTypeId;
 
@@ -354,7 +364,9 @@ BEGIN
     IF @SpaceId IS NULL
     BEGIN
         ROLLBACK TRANSACTION;
-        RAISERROR('No available space for the requested period',16,1);
+        SELECT NULL AS bookingId, NULL AS bookingGuid, NULL AS assignedSpaceId,
+               NULL AS assignedSpaceName, NULL AS assignedSpaceCode,
+               'No available space for the requested period' AS errorMessage;
         RETURN;
     END
 
@@ -381,6 +393,14 @@ BEGIN
     END
 
     COMMIT TRANSACTION;
+
+    SELECT
+        @BookingId         AS bookingId,
+        CAST(@BookingGuid AS NVARCHAR(36)) AS bookingGuid,
+        @AssignedSpaceId   AS assignedSpaceId,
+        @AssignedSpaceName AS assignedSpaceName,
+        @AssignedSpaceCode AS assignedSpaceCode,
+        NULL               AS errorMessage;
 END
 GO
 

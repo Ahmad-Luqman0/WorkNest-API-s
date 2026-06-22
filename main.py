@@ -3,6 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, Union
 import random
+import smtplib
+import os
+from email.mime.text import MIMEText
 from datetime import datetime, timedelta
 
 try:
@@ -144,6 +147,27 @@ def paginate(items: list, page: int, limit: int, search: str = ""):
 
 def ok(data=None, message="Success"):
     return {"isSuccessful": True, "message": message, "data": data}
+
+
+def send_tour_notification(fullName: str, email: str, phone: str, message: str):
+    from_email = os.getenv("NOTIFY_FROM_EMAIL")
+    to_email   = os.getenv("NOTIFY_TO_EMAIL")
+    password   = os.getenv("GMAIL_APP_PASSWORD")
+    if not all([from_email, to_email, password]):
+        return
+    msg = MIMEText(f"""New Book a Tour Request:
+
+Name:    {fullName}
+Email:   {email}
+Phone:   {phone}
+Message: {message}
+""")
+    msg["Subject"] = f"New Tour Request from {fullName} — WorkNest"
+    msg["From"]    = from_email
+    msg["To"]      = to_email
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+        s.login(from_email, password)
+        s.send_message(msg)
 
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
@@ -1514,6 +1538,10 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
         email_to_resolve = x_user_email or payload.email
         user_id, _ = get_user_id_by_email(email_to_resolve)
         new_id = book_tour(payload.fullName, payload.email, payload.message, payload.phone, user_id)
+        try:
+            send_tour_notification(payload.fullName, payload.email, payload.phone, payload.message)
+        except Exception:
+            pass  # never fail the request if email errors
         return ok({"id": new_id, "fullName": payload.fullName, "email": payload.email}, "Contact recorded.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

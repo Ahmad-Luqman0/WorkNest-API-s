@@ -1,19 +1,13 @@
 import pymssql
 import os
+from dotenv import load_dotenv
 
 try:
     from api.roles import map_role
 except ImportError:
     from roles import map_role
 
-env_path = os.path.join(os.path.dirname(__file__), ".env")
-if os.path.exists(env_path):
-    with open(env_path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, v = line.split("=", 1)
-                os.environ[k.strip()] = v.strip()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 DB_SERVER   = os.getenv("DB_SERVER")
 DB_PORT     = int(os.getenv("DB_PORT")) if os.getenv("DB_PORT") else None

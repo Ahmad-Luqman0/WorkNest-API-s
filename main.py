@@ -7,6 +7,9 @@ import smtplib
 import os
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 try:
     from api.payfast import build_payfast_payload, verify_notify_signature
@@ -115,6 +118,7 @@ app = FastAPI(title="WorkNest API", version="1.0.0")
 
 ALLOWED_ORIGINS = [
     "http://localhost:4200",
+    "http://localhost:5173",
     "https://worknest.vercel.app",
     "https://work-nest-api-s.vercel.app",
     "https://worknestpk.com",
@@ -153,7 +157,9 @@ def send_tour_notification(fullName: str, email: str, phone: str, message: str):
     from_email = os.getenv("NOTIFY_FROM_EMAIL")
     to_email   = os.getenv("NOTIFY_TO_EMAIL")
     password   = os.getenv("GMAIL_APP_PASSWORD")
+    print(f"[EMAIL DEBUG] from={from_email} to={to_email} pass_set={bool(password)}")
     if not all([from_email, to_email, password]):
+        print("[EMAIL ERROR] Missing email credentials in .env")
         return
     msg = MIMEText(f"""New Book a Tour Request:
 
@@ -162,12 +168,13 @@ Email:   {email}
 Phone:   {phone}
 Message: {message}
 """)
-    msg["Subject"] = f"New Tour Request from {fullName} — WorkNest"
+    msg["Subject"] = f"New Tour Request from {fullName} \u2014 WorkNest"
     msg["From"]    = from_email
     msg["To"]      = to_email
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
         s.login(from_email, password)
         s.send_message(msg)
+    print("[EMAIL] Notification sent successfully")
 
 
 # ── Pydantic Models ───────────────────────────────────────────────────────────
@@ -1540,8 +1547,8 @@ def create_book_tour(payload: ContactRequest, x_user_email: Optional[str] = Head
         new_id = book_tour(payload.fullName, payload.email, payload.message, payload.phone, user_id)
         try:
             send_tour_notification(payload.fullName, payload.email, payload.phone, payload.message)
-        except Exception:
-            pass  # never fail the request if email errors
+        except Exception as email_err:
+            print(f"[EMAIL ERROR] {email_err}")
         return ok({"id": new_id, "fullName": payload.fullName, "email": payload.email}, "Contact recorded.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

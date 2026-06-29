@@ -58,7 +58,7 @@ SP_GET_SPACES_FOR_REASSIGNMENT = "EXEC dbo.WN_GetAvailableSpacesForReassignment 
 SP_GET_BOOKING_CALENDAR = "EXEC dbo.WN_GetBookingCalendar %s, %s, %s"
 
 # Space configuration SPs
-SP_GET_SPACE_CONFIG    = "EXEC dbo.WN_Spaces_GetConfig"
+SP_GET_SPACE_CONFIG    = "EXEC dbo.WN_SpaceConfig_GetList"
 SP_CHECK_OVERLAP       = "EXEC dbo.WN_Booking_CheckOverlap %s, %s, %s"
 SP_GET_AVAILABLE_V2    = "EXEC dbo.WN_Booking_GetAvailableSpaces %s, %s, %s, %s"
 
@@ -955,7 +955,19 @@ def reassign_booking(booking_id: int, new_space_id: int, admin_user_email: str):
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_REASSIGN_BOOKING, (booking_id, new_space_id, admin_user_email))
+        # Resolve booking GUID from numeric id
+        cursor.execute("SELECT IdGUID FROM dbo.WN_Bookings WITH (NOLOCK) WHERE Id = %d", (booking_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise Exception("Booking not found")
+        booking_guid = str(row["IdGUID"])
+        # Resolve space GUID from numeric id
+        cursor.execute("SELECT IdGUID FROM dbo.WN_Spaces WITH (NOLOCK) WHERE Id = %d", (new_space_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise Exception("Space not found")
+        space_guid = str(row["IdGUID"])
+        cursor.execute(SP_REASSIGN_BOOKING, (booking_guid, space_guid, admin_user_email))
         result = cursor.fetchone()
         conn.commit()
         
@@ -1005,7 +1017,14 @@ def get_space_config():
     conn = get_connection()
     try:
         cursor = conn.cursor(as_dict=True)
-        cursor.execute(SP_GET_SPACE_CONFIG)
+        cursor.execute("""
+            SELECT Id, SpaceCategory, TotalSpaces, CodePrefix, MinCode,
+                   DefaultCapacities, OpeningTime, ClosingTime,
+                   ISNULL(SecurityDeposit, 0) AS SecurityDeposit,
+                   UpdatedOn, UpdatedBy
+            FROM dbo.WN_SpaceConfig
+            ORDER BY Id
+        """)
         rows = cursor.fetchall()
         return [{
             "id":                row.get("Id"),
@@ -1016,6 +1035,7 @@ def get_space_config():
             "defaultCapacities": row.get("DefaultCapacities") or "",
             "openingTime":       row.get("OpeningTime") or "",
             "closingTime":       row.get("ClosingTime") or "",
+            "securityDeposit":   float(row.get("SecurityDeposit") or 0),
             "updatedOn":         _iso(row.get("UpdatedOn")),
             "updatedBy":         row.get("UpdatedBy") or "",
         } for row in rows]
@@ -1027,15 +1047,16 @@ def get_space_config():
 
 def update_space_config(space_category: str, total_spaces: int,
                         default_capacities: str = None, opening_time: str = None,
-                        closing_time: str = None, admin_email: str = None):
+                        closing_time: str = None, admin_email: str = None,
+                        security_deposit: float = None):
     """Update space category config via WN_Spaces_UpdateConfig."""
     conn = get_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
-            "EXEC dbo.WN_Spaces_UpdateConfig %s, %s, %s, %s, %s, %s",
+            "EXEC dbo.WN_Spaces_UpdateConfig %s, %s, %s, %s, %s, %s, %s",
             (space_category, total_spaces, default_capacities,
-             opening_time, closing_time, admin_email)
+             opening_time, closing_time, admin_email, security_deposit)
         )
         conn.commit()
         return True

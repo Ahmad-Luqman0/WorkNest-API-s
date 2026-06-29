@@ -325,6 +325,7 @@ class SpaceConfigUpdateRequest(BaseModel):
     defaultCapacities: Optional[str] = None   # comma-sep e.g. '3,4,5'
     openingTime: Optional[str] = None          # 'HH:MM'
     closingTime: Optional[str] = None
+    securityDeposit: Optional[float] = None    # refundable deposit for Private offices
 
 class SpaceInventoryRequest(BaseModel):
     spaceCategory: str
@@ -1856,6 +1857,25 @@ def get_space_config_endpoint():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/space-config/deposit/{category}")
+@app.get("/space-config/deposit/{category}")
+def get_security_deposit(category: str):
+    """Get security deposit for a specific space category directly from table."""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor(as_dict=True)
+        cursor.execute(
+            "SELECT ISNULL(SecurityDeposit, 0) AS SecurityDeposit FROM dbo.WN_SpaceConfig WHERE SpaceCategory = %s",
+            (category,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        deposit = float(row["SecurityDeposit"]) if row else 0.0
+        return ok({"spaceCategory": category, "securityDeposit": deposit})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.put("/api/space-config/{category}")
 @app.put("/space-config/{category}")
 def update_space_config_endpoint(
@@ -1871,7 +1891,8 @@ def update_space_config_endpoint(
             payload.defaultCapacities,
             payload.openingTime,
             payload.closingTime,
-            x_user_email
+            x_user_email,
+            payload.securityDeposit,
         )
         return ok(message=f"Space config for '{category}' updated.")
     except Exception as e:
